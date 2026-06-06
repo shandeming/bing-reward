@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 from time import sleep
 from typing import Any
 from urllib.parse import quote_plus
@@ -15,12 +16,14 @@ class RewardTask:
     index: int
     title: str
     status: str
-    selector: str
+    selector: Locator
 
 
 class RewardsSidebarError(RuntimeError):
     """Raised when the Bing Rewards sidebar cannot be opened or found."""
 
+
+TASKS_TYPES = ["DAILY_SET_TASK_SELECTOR", "EXPLORE_TASK_SELECTOR"]
 
 REWARDS_ICON_SELECTORS = (
     "#id_rh_w",
@@ -46,7 +49,13 @@ SIDEBAR_SELECTORS = (
     "[id*='reward']",
 )
 
+SEARCH_INPUT_SELECTOR = ["textarea[name='q']", "#sb_form_q"]
+
 REWARDS_FLYOUT_FRAME_SELECTOR = "#rewid-f iframe"
+
+DAILY_SET_TASK_SELECTOR = ["#daily_set_card .promo_cont"]
+
+EXPLORE_TASK_SELECTOR = ["#exb-activityChecklist .promo_cont"]
 
 TASK_SELECTORS = (
     "a[href]",
@@ -143,7 +152,10 @@ def find_rewards_sidebar(page: Page) -> Locator | None:
 
 
 def list_visible_tasks(
-    page: Page, sidebar: Locator | None = None, limit: int = 30
+    page: Page,
+    selector_list: list[str],
+    sidebar: Locator | None = None,
+    limit: int = 30,
 ) -> list[RewardTask]:
     task_scope = sidebar or find_rewards_sidebar(page)
     if task_scope is None:
@@ -153,7 +165,7 @@ def list_visible_tasks(
     tasks: list[RewardTask] = []
     seen_titles: set[str] = set()
 
-    for selector in TASK_SELECTORS:
+    for selector in selector_list:
         locator = locator_scope.locator(selector)
         try:
             count = min(locator.count(), limit)
@@ -175,7 +187,7 @@ def list_visible_tasks(
                     index=len(tasks) + 1,
                     title=title,
                     status=_infer_status(title),
-                    selector=f"{selector} >> nth={i}",
+                    selector=item,
                 )
             )
 
@@ -184,40 +196,79 @@ def list_visible_tasks(
 
 def guide_tasks(page: Page, input_func=input) -> None:
     sidebar = open_rewards_sidebar(page, input_func=input_func)
-    tasks = list_visible_tasks(page, sidebar=sidebar)
-    if not tasks:
-        print(
-            "No visible Rewards sidebar tasks were detected. Bing is open for manual review."
-        )
-        return
+    for task_type in TASKS_TYPES:
+        selector_list = globals().get(task_type)
+        if not selector_list:
+            continue
+        tasks = list_visible_tasks(page, selector_list, sidebar=sidebar)
+        if not tasks:
+            continue
 
-    print("Visible Rewards sidebar tasks:")
-    for task in tasks:
-        print(f"{task.index}. {task.title} [{task.status}]")
+        print(f"Detected {len(tasks)} {task_type.replace('_', ' ').title()}s:")
+        for task in tasks:
+            print(f"{task.index}. {task.title} [{task.status}]")
 
-    for task in tasks:
         answer = (
-            input_func(f"Open task {task.index}: {task.title!r}? [y/N] ")
+            input_func(f"Open these {len(tasks)} tasks in the browser? [y/N] ")
             .strip()
             .lower()
         )
-        if answer not in {"y", "yes"}:
-            continue
+        if answer in {"y", "yes"}:
+            if task_type == "EXPLORE_TASK_SELECTOR":
+                complete_explore_tasks(page, tasks)
+            elif task_type == "DAILY_SET_TASK_SELECTOR":
+                complete_daily_set(tasks)
+    # tasks = list_visible_tasks(page, sidebar=sidebar)
+    # if not tasks:
+    #     print(
+    #         "No visible Rewards sidebar tasks were detected. Bing is open for manual review."
+    #     )
+    #     return
 
-        locator = _locator_from_task(page, task, sidebar)
-        if locator is None:
-            print(f"Could not re-locate task {task.index}; skipping.")
-            continue
+    # print("Visible Rewards sidebar tasks:")
+    # for task in tasks:
+    #     print(f"{task.index}. {task.title} [{task.status}]")
 
-        locator.scroll_into_view_if_needed()
-        try:
-            locator.click(timeout=3000)
-            page.wait_for_load_state("domcontentloaded", timeout=3000)
-        except PlaywrightTimeoutError:
-            print(f"Task {task.index} did not open within the expected time.")
-            continue
+    # for task in tasks:
+    #     answer = (
+    #         input_func(f"Open task {task.index}: {task.title!r}? [y/N] ")
+    #         .strip()
+    #         .lower()
+    #     )
+    #     if answer not in {"y", "yes"}:
+    #         continue
+    #     task.selector.click(timeout=5000)
+    # locator = _locator_from_task(page, task, sidebar)
+    # if locator is None:
+    #     print(f"Could not re-locate task {task.index}; skipping.")
+    #     continue
 
-        print("Task opened. Complete any reward action manually in the browser.")
+    # locator.scroll_into_view_if_needed()
+    # try:
+    #     locator.click(timeout=3000)
+    #     page.wait_for_load_state("domcontentloaded", timeout=3000)
+    # except PlaywrightTimeoutError:
+    #     print(f"Task {task.index} did not open within the expected time.")
+    #     continue
+
+    # print("Task opened. Complete any reward action manually in the browser.")
+
+
+def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
+    for task in tasks:
+        selector = task.selector
+        if not _is_visible(selector):
+            continue
+        task.selector.click(timeout=5000)
+        sleep(random.uniform(1.0, 3.0))
+        search_term = task.title.split("|")[-1].strip().split("Search on Bing")[-1]
+        search_for_term(page, search_term)
+        sleep(random.uniform(2.0, 4.0))
+
+
+def complete_daily_set(tasks: list[RewardTask]) -> None:
+    for task in tasks:
+        task.selector.click(timeout=5000)
 
 
 def run_confirmed_searches(
@@ -242,6 +293,15 @@ def run_confirmed_searches(
         )
         sleep(delay_seconds)
         print("Submitted confirmed search.")
+
+
+def search_for_term(page: Page, term: str) -> None:
+    for selector in SEARCH_INPUT_SELECTOR:
+        locator = page.locator(selector).first
+        if _is_visible(locator):
+            locator.fill(term, timeout=5000)
+            locator.press("Enter")
+            return
 
 
 def _is_visible(locator: Locator) -> bool:
