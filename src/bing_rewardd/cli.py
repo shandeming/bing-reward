@@ -59,10 +59,6 @@ def main(argv: list[str] | None = None) -> int:
             page = open_url(context, BING_URL)
             guide_tasks(page)
             _wait_for_exit()
-        elif args.command == "search":
-            page = open_url(context, BING_URL)
-            run_confirmed_searches(page)
-            _wait_for_exit()
         else:
             raise AssertionError(f"Unhandled command: {args.command}")
 

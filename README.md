@@ -17,7 +17,6 @@ python -m playwright install chromium
 
 ```powershell
 bing-rewardd tasks
-bing-rewardd search
 ```
 
 By default, browser session data is stored in `.browser-profile/` so your Microsoft login can persist without using your normal Chrome profile.
@@ -27,4 +26,3 @@ By default, browser session data is stored in `.browser-profile/` so your Micros
 - The browser runs visibly, not headless.
 - Credentials are not stored by the app.
 - Rewards task cards are opened only after confirmation.
-- Search terms must be entered by you and confirmed one at a time.
