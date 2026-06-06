@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bing-rewardd"
+version = "0.1.0"
+description = "A compliant CLI assistant for opening Bing and guiding Microsoft Rewards tasks."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "playwright>=1.44",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+]
+
+[project.scripts]
+bing-rewardd = "bing_rewardd.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

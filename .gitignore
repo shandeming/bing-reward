@@ -1,0 +1,18 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Test cache
+.pytest_cache/
+
+.browser-profile
+debug_screenshots
