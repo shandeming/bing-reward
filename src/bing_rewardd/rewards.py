@@ -375,19 +375,6 @@ def _infer_status(text: str) -> str:
     return "visible"
 
 
-def _locator_from_task(
-    page: Page, task: RewardTask, sidebar: Locator | None = None
-) -> Locator | None:
-    selector, _, nth = task.selector.partition(" >> nth=")
-    if not nth.isdigit():
-        return None
-
-    task_scope = sidebar or find_rewards_sidebar(page)
-    if task_scope is None:
-        return None
-    return _task_locator_scope(page, task_scope).locator(selector).nth(int(nth))
-
-
 def _task_locator_scope(page: Page, sidebar: Locator) -> Any:
     try:
         if sidebar.locator("iframe").count() > 0:

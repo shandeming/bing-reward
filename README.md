@@ -16,8 +16,6 @@ python -m playwright install chromium
 ## Commands
 
 ```powershell
-bing-rewardd start
-bing-rewardd rewards
 bing-rewardd tasks
 bing-rewardd search
 ```
