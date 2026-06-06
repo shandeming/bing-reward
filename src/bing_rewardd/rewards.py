@@ -218,40 +218,6 @@ def guide_tasks(page: Page, input_func=input) -> None:
                 complete_explore_tasks(page, tasks)
             elif task_type == "DAILY_SET_TASK_SELECTOR":
                 complete_daily_set(tasks)
-    # tasks = list_visible_tasks(page, sidebar=sidebar)
-    # if not tasks:
-    #     print(
-    #         "No visible Rewards sidebar tasks were detected. Bing is open for manual review."
-    #     )
-    #     return
-
-    # print("Visible Rewards sidebar tasks:")
-    # for task in tasks:
-    #     print(f"{task.index}. {task.title} [{task.status}]")
-
-    # for task in tasks:
-    #     answer = (
-    #         input_func(f"Open task {task.index}: {task.title!r}? [y/N] ")
-    #         .strip()
-    #         .lower()
-    #     )
-    #     if answer not in {"y", "yes"}:
-    #         continue
-    #     task.selector.click(timeout=5000)
-    # locator = _locator_from_task(page, task, sidebar)
-    # if locator is None:
-    #     print(f"Could not re-locate task {task.index}; skipping.")
-    #     continue
-
-    # locator.scroll_into_view_if_needed()
-    # try:
-    #     locator.click(timeout=3000)
-    #     page.wait_for_load_state("domcontentloaded", timeout=3000)
-    # except PlaywrightTimeoutError:
-    #     print(f"Task {task.index} did not open within the expected time.")
-    #     continue
-
-    # print("Task opened. Complete any reward action manually in the browser.")
 
 
 def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
