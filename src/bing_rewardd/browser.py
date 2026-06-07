@@ -34,7 +34,9 @@ def launch_persistent_browser(config: BrowserConfig) -> Iterator[BrowserContext]
             context.close()
 
 
-def _launch_with_preferred_channel(playwright: Playwright, config: BrowserConfig) -> BrowserContext:
+def _launch_with_preferred_channel(
+    playwright: Playwright, config: BrowserConfig
+) -> BrowserContext:
     launch_args = {
         "user_data_dir": str(config.profile_dir),
         "headless": config.headless,
@@ -43,7 +45,9 @@ def _launch_with_preferred_channel(playwright: Playwright, config: BrowserConfig
     }
 
     try:
-        return playwright.chromium.launch_persistent_context(channel="chrome", **launch_args)
+        return playwright.chromium.launch_persistent_context(
+            channel="chrome", **launch_args
+        )
     except Error as exc:
         if "Chromium distribution 'chrome' is not found" not in str(exc):
             raise

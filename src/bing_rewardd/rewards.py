@@ -230,6 +230,15 @@ def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
 
 def complete_daily_set(tasks: list[RewardTask]) -> None:
     for task in tasks:
+        with page.context.expect_page() as new_page_info:
+            task.selector.click()
+
+        new_page = new_page_info.value
+        new_page.wait_for_load_state()
+
+        # do work
+
+        new_page.close()
         task.selector.click(timeout=5000)
 
 
