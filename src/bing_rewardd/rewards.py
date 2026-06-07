@@ -208,25 +208,21 @@ def guide_tasks(page: Page, input_func=input) -> None:
         for task in tasks:
             print(f"{task.index}. {task.title} [{task.status}]")
 
-        answer = (
-            input_func(f"Open these {len(tasks)} tasks in the browser? [y/N] ")
-            .strip()
-            .lower()
-        )
-        if answer in {"y", "yes"}:
-            if task_type == "EXPLORE_TASK_SELECTOR":
-                complete_explore_tasks(page, tasks)
-            elif task_type == "DAILY_SET_TASK_SELECTOR":
-                complete_daily_set(tasks)
+        if task_type == "EXPLORE_TASK_SELECTOR":
+            complete_explore_tasks(page, tasks)
+        elif task_type == "DAILY_SET_TASK_SELECTOR":
+            complete_daily_set(tasks)
 
 
 def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
+    # activate each task, then do searches for each task
     for task in tasks:
         selector = task.selector
         if not _is_visible(selector):
             continue
         task.selector.click(timeout=5000)
-        sleep(random.uniform(1.0, 3.0))
+        sleep(random.uniform(2.0, 4.0))
+    for task in tasks:
         search_term = task.title.split("|")[-1].strip().split("Search on Bing")[-1]
         search_for_term(page, search_term)
         sleep(random.uniform(2.0, 4.0))
