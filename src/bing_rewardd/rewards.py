@@ -55,7 +55,9 @@ REWARDS_FLYOUT_FRAME_SELECTOR = "#rewid-f iframe"
 
 DAILY_SET_TASK_SELECTOR = ["#daily_set_card .promo_cont"]
 
-EXPLORE_TASK_SELECTOR = ["#exb-activityChecklist .promo_cont"]
+EXPLORE_TASK_SELECTOR = [
+    "#exb-activityChecklist .promo_cont[data-is-inprogress-enabled='yes']"
+]
 
 TASK_SELECTORS = (
     "a[href]",
@@ -209,9 +211,11 @@ def guide_tasks(page: Page, input_func=input) -> None:
             print(f"{task.index}. {task.title} [{task.status}]")
 
         if task_type == "EXPLORE_TASK_SELECTOR":
+            search_for_term(page, "weather")
+            page.click("#est_en")
             complete_explore_tasks(page, tasks)
         elif task_type == "DAILY_SET_TASK_SELECTOR":
-            complete_daily_set(tasks)
+            complete_daily_set(page, tasks)
 
 
 def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
@@ -228,18 +232,20 @@ def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
         sleep(random.uniform(2.0, 4.0))
 
 
-def complete_daily_set(tasks: list[RewardTask]) -> None:
-    for task in tasks:
-        with page.context.expect_page() as new_page_info:
-            task.selector.click()
-
-        new_page = new_page_info.value
-        new_page.wait_for_load_state()
-
-        # do work
-
-        new_page.close()
-        task.selector.click(timeout=5000)
+def complete_daily_set(page: Page, tasks: list[RewardTask]) -> None:
+    count = len(tasks)
+    for i in range(count):
+        sidebar = open_rewards_sidebar(page)
+        tasks = list_visible_tasks(page, DAILY_SET_TASK_SELECTOR, sidebar=sidebar)
+        card = tasks[i].selector if i < len(tasks) else None
+        if not card or not _is_visible(card):
+            continue
+        label = card.get_attribute("aria-label") or ""
+        status = label.split(" - Offer ")[-1] if " - Offer " in label else ""
+        if "is" in status.lower():
+            continue
+        card.click()
+        sleep(random.uniform(2.0, 4.0))
 
 
 def run_confirmed_searches(

@@ -14,6 +14,7 @@ from bing_rewardd.rewards import (
     guide_tasks,
     open_rewards_sidebar,
     run_confirmed_searches,
+    search_for_term,
 )
 
 
