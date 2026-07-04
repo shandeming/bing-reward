@@ -9,8 +9,13 @@ on:
 jobs:
   daily:
     name: Run daily task
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    env:
+      BROWSER_PROFILE_DIR: D:\Code\bing-rewardd\.browser-profile
 
     steps:
       - name: Checkout
@@ -26,42 +31,13 @@ jobs:
         run: python -m pip install -e ".[test]"
 
       - name: Install Playwright browser
-        run: python -m playwright install --with-deps chromium
-
-      - name: Restore browser profile
-        env:
-          BROWSER_PROFILE_ZIP_BASE64: ${{ secrets.BROWSER_PROFILE_ZIP_BASE64 }}
-          BROWSER_PROFILE_PASSPHRASE: ${{ secrets.BROWSER_PROFILE_PASSPHRASE }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p .browser-profile
-          if [ -n "$BROWSER_PROFILE_ZIP_BASE64" ]; then
-            printf '%s' "$BROWSER_PROFILE_ZIP_BASE64" | base64 -d > browser-profile.zip
-            unzip -q browser-profile.zip -d .browser-profile
-            rm browser-profile.zip
-          elif gh release download browser-profile --pattern browser-profile.zip.enc --dir .github; then
-            openssl enc -d -aes-256-cbc -pbkdf2 \
-              -in .github/browser-profile.zip.enc \
-              -out browser-profile.zip \
-              -pass env:BROWSER_PROFILE_PASSPHRASE
-            unzip -q browser-profile.zip -d .browser-profile
-            rm browser-profile.zip .github/browser-profile.zip.enc
-          elif [ -f .github/browser-profile.zip.enc ] && [ -n "$BROWSER_PROFILE_PASSPHRASE" ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 \
-              -in .github/browser-profile.zip.enc \
-              -out browser-profile.zip \
-              -pass env:BROWSER_PROFILE_PASSPHRASE
-            unzip -q browser-profile.zip -d .browser-profile
-            rm browser-profile.zip
-          else
-            echo "No browser profile configured. The run may require sign-in."
-          fi
+        run: python -m playwright install chromium
 
       - name: Run tests
         run: python -m pytest
 
       - name: Run bing-rewardd tasks
-        run: xvfb-run -a timeout 20m python -m bing_rewardd.cli --no-wait --screenshot-dir debug_screenshots tasks
+        run: python -m bing_rewardd.cli --profile-dir "$env:BROWSER_PROFILE_DIR" --no-wait --screenshot-dir debug_screenshots tasks
 
       - name: Upload debug screenshots
         if: always()
@@ -70,12 +46,3 @@ jobs:
           name: debug-screenshots
           path: debug_screenshots
           retention-days: 3
-
-      - name: Upload updated browser profile
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-profile
-          path: .browser-profile
-          include-hidden-files: true
-          retention-days: 1
