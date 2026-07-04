@@ -56,10 +56,18 @@ def main(argv: list[str] | None = None) -> int:
     config = BrowserConfig(profile_dir=args.profile_dir, slow_mo_ms=args.slow_mo)
 
     with launch_persistent_browser(config) as context:
-        if args.command == "tasks":
-            page = open_url(context, BING_URL)
+        page = open_url(context, BING_URL)
+
+        if args.command == "start":
+            _wait_for_exit()
+        elif args.command == "rewards":
+            open_rewards_sidebar(page)
+            _wait_for_exit()
+        elif args.command == "tasks":
             guide_tasks(page)
             _wait_for_exit()
+        elif args.command == "search":
+            run_confirmed_searches(page)
         else:
             raise AssertionError(f"Unhandled command: {args.command}")
 

@@ -155,7 +155,7 @@ def find_rewards_sidebar(page: Page) -> Locator | None:
 
 def list_visible_tasks(
     page: Page,
-    selector_list: list[str],
+    selector_list: list[str] | tuple[str, ...] = TASK_SELECTORS,
     sidebar: Locator | None = None,
     limit: int = 30,
 ) -> list[RewardTask]:
