@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Optional Playwright slow motion delay in milliseconds.",
     )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Close the browser immediately after the command finishes.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("start", help="Open Chrome to Bing.")
@@ -59,13 +64,13 @@ def main(argv: list[str] | None = None) -> int:
         page = open_url(context, BING_URL)
 
         if args.command == "start":
-            _wait_for_exit()
+            _wait_for_exit(args.no_wait)
         elif args.command == "rewards":
             open_rewards_sidebar(page)
-            _wait_for_exit()
+            _wait_for_exit(args.no_wait)
         elif args.command == "tasks":
             guide_tasks(page)
-            _wait_for_exit()
+            _wait_for_exit(args.no_wait)
         elif args.command == "search":
             run_confirmed_searches(page)
         else:
@@ -74,7 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _wait_for_exit() -> None:
+def _wait_for_exit(skip: bool = False) -> None:
+    if skip:
+        return
     input("Browser is open. Press Enter to close this assistant session.")
 
 

@@ -61,7 +61,7 @@ jobs:
         run: python -m pytest
 
       - name: Run bing-rewardd tasks
-        run: xvfb-run -a timeout 20m python -m bing_rewardd.cli tasks
+        run: xvfb-run -a timeout 20m python -m bing_rewardd.cli --no-wait tasks
 
       - name: Upload updated browser profile
         if: always()
