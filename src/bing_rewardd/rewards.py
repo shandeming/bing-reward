@@ -211,8 +211,6 @@ def guide_tasks(page: Page, input_func=input) -> None:
             print(f"{task.index}. {task.title} [{task.status}]")
 
         if task_type == "EXPLORE_TASK_SELECTOR":
-            search_for_term(page, "weather")
-            page.click("#est_en")
             complete_explore_tasks(page, tasks)
         elif task_type == "DAILY_SET_TASK_SELECTOR":
             complete_daily_set(page, tasks)
@@ -226,6 +224,8 @@ def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
             continue
         task.selector.click(timeout=5000)
         sleep(random.uniform(2.0, 4.0))
+    search_for_term(page, "weather")
+    page.click("#est_en")
     for task in tasks:
         search_term = task.title.split("|")[-1].strip().split("Search on Bing")[-1]
         search_for_term(page, search_term)
