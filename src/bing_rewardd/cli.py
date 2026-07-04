@@ -40,6 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Close the browser immediately after the command finishes.",
     )
+    parser.add_argument(
+        "--screenshot-dir",
+        type=Path,
+        help="Optional directory for a final browser screenshot.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("start", help="Open Chrome to Bing.")
@@ -63,18 +68,22 @@ def main(argv: list[str] | None = None) -> int:
     with launch_persistent_browser(config) as context:
         page = open_url(context, BING_URL)
 
-        if args.command == "start":
-            _wait_for_exit(args.no_wait)
-        elif args.command == "rewards":
-            open_rewards_sidebar(page)
-            _wait_for_exit(args.no_wait)
-        elif args.command == "tasks":
-            guide_tasks(page)
-            _wait_for_exit(args.no_wait)
-        elif args.command == "search":
-            run_confirmed_searches(page)
-        else:
-            raise AssertionError(f"Unhandled command: {args.command}")
+        try:
+            if args.command == "start":
+                _wait_for_exit(args.no_wait)
+            elif args.command == "rewards":
+                open_rewards_sidebar(page)
+                _wait_for_exit(args.no_wait)
+            elif args.command == "tasks":
+                guide_tasks(page)
+                _wait_for_exit(args.no_wait)
+            elif args.command == "search":
+                run_confirmed_searches(page)
+            else:
+                raise AssertionError(f"Unhandled command: {args.command}")
+        finally:
+            if args.screenshot_dir:
+                _save_final_screenshot(page, args.screenshot_dir)
 
     return 0
 
@@ -83,6 +92,15 @@ def _wait_for_exit(skip: bool = False) -> None:
     if skip:
         return
     input("Browser is open. Press Enter to close this assistant session.")
+
+
+def _save_final_screenshot(page, screenshot_dir: Path) -> None:
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        page.wait_for_timeout(3000)
+    except Exception:
+        pass
+    page.screenshot(path=str(screenshot_dir / "final.png"), full_page=True)
 
 
 if __name__ == "__main__":

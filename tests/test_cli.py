@@ -27,6 +27,13 @@ def test_parser_accepts_no_wait() -> None:
     assert args.no_wait is True
 
 
+def test_parser_accepts_screenshot_dir() -> None:
+    args = build_parser().parse_args(["--screenshot-dir", "shots", "tasks"])
+
+    assert args.command == "tasks"
+    assert args.screenshot_dir == Path("shots")
+
+
 def test_default_profile_dir_uses_project_local_directory(tmp_path: Path) -> None:
     assert default_profile_dir(tmp_path) == tmp_path / ".browser-profile"
 
