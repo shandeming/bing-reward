@@ -10,12 +10,7 @@ from bing_rewardd.browser import (
     launch_persistent_browser,
     open_url,
 )
-from bing_rewardd.rewards import (
-    guide_tasks,
-    open_rewards_sidebar,
-    run_confirmed_searches,
-    search_for_term,
-)
+from bing_rewardd.rewards import guide_tasks
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-wait",
         action="store_true",
-        help="Close the browser immediately after the command finishes.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--screenshot-dir",
@@ -47,16 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("start", help="Open Chrome to Bing.")
-    subparsers.add_parser(
-        "rewards", help="Open Bing and show the Microsoft Rewards sidebar."
-    )
     subparsers.add_parser(
         "tasks",
-        help="List visible Rewards sidebar tasks and prompt before opening each.",
-    )
-    subparsers.add_parser(
-        "search", help="Submit user-provided Bing searches after per-term confirmation."
+        help="Detect and complete all visible Rewards tasks.",
     )
     return parser
 
@@ -69,16 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         page = open_url(context, BING_URL)
 
         try:
-            if args.command == "start":
-                _wait_for_exit(args.no_wait)
-            elif args.command == "rewards":
-                open_rewards_sidebar(page)
-                _wait_for_exit(args.no_wait)
-            elif args.command == "tasks":
+            if args.command == "tasks":
                 guide_tasks(page)
-                _wait_for_exit(args.no_wait)
-            elif args.command == "search":
-                run_confirmed_searches(page)
             else:
                 raise AssertionError(f"Unhandled command: {args.command}")
         finally:
@@ -86,12 +66,6 @@ def main(argv: list[str] | None = None) -> int:
                 _save_final_screenshot(page, args.screenshot_dir)
 
     return 0
-
-
-def _wait_for_exit(skip: bool = False) -> None:
-    if skip:
-        return
-    input("Browser is open. Press Enter to close this assistant session.")
 
 
 def _save_final_screenshot(page, screenshot_dir: Path) -> None:

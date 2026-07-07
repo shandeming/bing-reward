@@ -1,0 +1,46 @@
+# bing-rewardd — Agent Guide
+
+## Entrypoint
+
+- Package: `bing_rewardd`, registered as console script `bing-rewardd` → `bing_rewardd.cli:main`
+- Source under `src/bing_rewardd/` (setuptools `find`), tests under `tests/`
+
+## Setup
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[test]"
+python -m playwright install chromium
+```
+
+## Commands & flags
+
+| Command | Action |
+|---------|--------|
+| `bing-rewardd tasks` | Detect and complete all visible Rewards tasks |
+
+Flags: `--profile-dir` (default `.browser-profile`), `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`
+
+## Running tests
+
+```powershell
+python -m pytest
+```
+
+Tests are pure unit tests — no browser required. Uses monkeypatching and fake Playwright classes (`FakePage`, `FakeLocator`). No test markers or fixtures.
+
+## Browser behavior
+
+- Runs **visible** (not headless), persistent Chrome profile at `.browser-profile/`
+- Tries `channel="chrome"` first; falls back to Chromium if Chrome not found
+- Browser closes immediately after command finishes (no user input required)
+- CI (`.github/workflows/daily.yml`): self-hosted Windows runner, daily at 09:00 Asia/Shanghai (UTC 01:00), 30-min timeout
+
+## Architecture notes
+
+- `browser.py` — Playwright context management, Chrome/Chromium fallback
+- `rewards.py` — All Rewards-sidebar interaction (sidebar detection by DOM scoring, task listing, click-through, search submission)
+- `cli.py` — Argparse-based CLI glue
+- No lint/formatter/typecheck config exists; no pre-commit hooks
+- All credentials handled via live browser login (not stored by code)

@@ -67,33 +67,21 @@ TASK_SELECTORS = (
 )
 
 
-def wait_for_possible_login(page: Page, input_func=input) -> None:
-    if "login" not in page.url.lower() and "signin" not in page.url.lower():
-        return
-
-    print(
-        "A Microsoft sign-in page is open. Complete login in the browser, then press Enter here."
-    )
-    input_func("")
-    page.wait_for_load_state("domcontentloaded")
+def wait_for_possible_login(page: Page) -> None:
+    if "login" in page.url.lower() or "signin" in page.url.lower():
+        page.wait_for_load_state("domcontentloaded")
 
 
-def open_rewards_sidebar(page: Page, input_func=input) -> Locator:
+def open_rewards_sidebar(page: Page) -> Locator:
     page.goto(BING_URL, wait_until="domcontentloaded")
     try:
         page.wait_for_load_state("networkidle", timeout=10000)
     except PlaywrightTimeoutError:
         pass
-    wait_for_possible_login(page, input_func=input_func)
+    wait_for_possible_login(page)
 
-    if find_rewards_sidebar(page) is None and not click_rewards_icon(
-        page, raise_on_missing=False
-    ):
-        print(
-            "Could not click the Rewards icon automatically. "
-            "If needed, sign in and click the upper-right Rewards icon in the browser, then press Enter here."
-        )
-        input_func("")
+    if find_rewards_sidebar(page) is None:
+        click_rewards_icon(page, raise_on_missing=True)
 
     try:
         page.wait_for_timeout(1500)
@@ -101,17 +89,6 @@ def open_rewards_sidebar(page: Page, input_func=input) -> Locator:
         pass
 
     sidebar = find_rewards_sidebar(page)
-    if sidebar is None:
-        print(
-            "The Rewards sidebar is not visible yet. Open it in the browser, then press Enter here."
-        )
-        input_func("")
-        try:
-            page.wait_for_timeout(1000)
-        except PlaywrightTimeoutError:
-            pass
-        sidebar = find_rewards_sidebar(page)
-
     if sidebar is None:
         raise RewardsSidebarError(
             "Could not find the Bing Rewards sidebar after clicking the upper-right Rewards icon."
@@ -196,8 +173,8 @@ def list_visible_tasks(
     return tasks
 
 
-def guide_tasks(page: Page, input_func=input) -> None:
-    sidebar = open_rewards_sidebar(page, input_func=input_func)
+def guide_tasks(page: Page) -> None:
+    sidebar = open_rewards_sidebar(page)
     for task_type in TASKS_TYPES:
         selector_list = globals().get(task_type)
         if not selector_list:
@@ -248,28 +225,7 @@ def complete_daily_set(page: Page, tasks: list[RewardTask]) -> None:
         sleep(random.uniform(2.0, 4.0))
 
 
-def run_confirmed_searches(
-    page: Page, input_func=input, delay_seconds: float = 2.0
-) -> None:
-    print("Enter genuine search terms. Leave blank to finish.")
-    while True:
-        term = input_func("Search term: ").strip()
-        if not term:
-            print("Search session finished.")
-            return
 
-        answer = (
-            input_func(f"Submit this Bing search: {term!r}? [y/N] ").strip().lower()
-        )
-        if answer not in {"y", "yes"}:
-            print("Skipped.")
-            continue
-
-        page.goto(
-            f"{BING_URL}/search?q={quote_plus(term)}", wait_until="domcontentloaded"
-        )
-        sleep(delay_seconds)
-        print("Submitted confirmed search.")
 
 
 def search_for_term(page: Page, term: str) -> None:

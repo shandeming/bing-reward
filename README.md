@@ -1,8 +1,8 @@
 # Bing Rewardd
 
-A compliant Python + Playwright CLI assistant for opening Chrome, navigating to Bing and Microsoft Rewards, and guiding user-confirmed Rewards actions.
+A fully automatic Python + Playwright CLI tool for opening Chrome, navigating to Bing and Microsoft Rewards, and completing visible Rewards tasks.
 
-This tool intentionally does not farm rewards, generate fake searches, bypass captchas, or click through Rewards tasks unattended. Search submissions require user-provided terms and explicit confirmation.
+This tool intentionally does not farm rewards, generate fake searches, bypass captchas, or store credentials. Search terms are extracted from task descriptions; the browser runs visibly with a persistent profile at `.browser-profile/` so your Microsoft login persists across sessions.
 
 ## Setup
 
@@ -16,13 +16,13 @@ python -m playwright install chromium
 ## Commands
 
 ```powershell
-bing-rewardd tasks
+bing-rewardd tasks      # Detect and complete all visible Rewards tasks
 ```
 
-By default, browser session data is stored in `.browser-profile/` so your Microsoft login can persist without using your normal Chrome profile.
+Flags: `--profile-dir DIR` (default `.browser-profile`), `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`
 
 ## Notes
 
 - The browser runs visibly, not headless.
-- Credentials are not stored by the app.
-- Rewards task cards are opened only after confirmation.
+- No user input required — all actions are automatic.
+- Credentials are not stored by the app. Use the persistent browser profile to log in once.

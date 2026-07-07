@@ -6,7 +6,6 @@ from bing_rewardd.rewards import (
     _infer_status,
     click_rewards_icon,
     list_visible_tasks,
-    run_confirmed_searches,
 )
 
 
@@ -92,24 +91,6 @@ def test_infer_status_available_from_points_text() -> None:
 
 def test_infer_status_complete_from_completed_text() -> None:
     assert _infer_status("Task completed") == "complete"
-
-
-def test_confirmed_search_decline_prevents_submission() -> None:
-    page = FakePage()
-    answers = iter(["weather tomorrow", "n", ""])
-
-    run_confirmed_searches(page, input_func=lambda _: next(answers), delay_seconds=0)
-
-    assert page.urls == []
-
-
-def test_confirmed_search_submits_approved_term() -> None:
-    page = FakePage()
-    answers = iter(["python playwright", "yes", ""])
-
-    run_confirmed_searches(page, input_func=lambda _: next(answers), delay_seconds=0)
-
-    assert page.urls == ["https://www.bing.com/search?q=python+playwright"]
 
 
 def test_rewards_icon_selector_prioritizes_bing_icon_id() -> None:
