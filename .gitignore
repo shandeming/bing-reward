@@ -18,3 +18,5 @@ build/
 debug_screenshots
 browser-profile.zip
 .github/browser-profile.zip.enc
+
+.vscode/
