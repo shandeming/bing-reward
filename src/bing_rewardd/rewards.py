@@ -261,14 +261,56 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
     email_input.fill(email, timeout=5000)
     print(f"  [login] Filled email, clicking Next...")
 
-    # Click Next/Submit
-    _click_submit(page)
+    # Click Next/Submit - try multiple selectors in order
+    submit_clicked = False
+    submit_selectors = [
+        "button:has-text('Next')",
+        "input[id='idSIButton9']",
+        "input[id='id_btnNext']",
+        "button[type='submit']",
+        "input[type='submit']",
+    ]
+    for sel in submit_selectors:
+        try:
+            btn = page.locator(sel).first
+            if _is_visible(btn):
+                btn.click(timeout=5000)
+                print(f"  [login] Clicked submit button via '{sel}'")
+                submit_clicked = True
+                break
+        except PlaywrightTimeoutError:
+            continue
 
-    # Wait for password input to appear
+    if not submit_clicked:
+        # Fallback: try pressing Enter to submit
+        print(f"  [login] Falling back to Enter key submit...")
+        try:
+            page.keyboard.press("Enter")
+            submit_clicked = True
+        except Exception:
+            # Last resort: use JavaScript to submit
+            print(f"  [login] Falling back to JS form submit...")
+            try:
+                page.evaluate("() => { document.querySelector('form')?.submit(); }")
+                submit_clicked = True
+            except Exception:
+                print(f"  [login] JS submit fallback failed")
+                return False
+
+    # Wait for password input to appear (give extra time for page transition)
     try:
-        page.wait_for_selector('input[type="password"]', timeout=10000)
+        page.wait_for_selector('input[type="password"]', timeout=15000)
     except PlaywrightTimeoutError:
         print(f"  [login] Password input did not appear after email submission")
+        # Debug: show what buttons/inputs are on the page
+        try:
+            btns = page.locator("button, input[type='submit']").count()
+            print(f"  [login] Debug: {btns} button/submit inputs on page")
+            # Show page text to identify the issue
+            body = page.locator("body").inner_text(timeout=5000)
+            print(f"  [login] Debug: page text: {body[:200]}")
+        except Exception:
+            pass
         return False
 
     # Find password input
@@ -288,7 +330,41 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
     pw_input.fill(password, timeout=5000)
     print(f"  [login] Filled password, submitting...")
 
-    _click_submit(page)
+    # Click Sign in / Submit - try multiple selectors
+    submit_clicked = False
+    sign_in_selectors = [
+        "button:has-text('Sign in')",
+        "button:has-text('Next')",
+        "input[id='idSIButton9']",
+        "button[type='submit']",
+        "input[type='submit']",
+    ]
+    for sel in sign_in_selectors:
+        try:
+            btn = page.locator(sel).first
+            if _is_visible(btn):
+                btn.click(timeout=5000)
+                print(f"  [login] Clicked sign-in button via '{sel}'")
+                submit_clicked = True
+                break
+        except PlaywrightTimeoutError:
+            continue
+
+    if not submit_clicked:
+        # Fallback: try pressing Enter to submit
+        print(f"  [login] Falling back to Enter key submit...")
+        try:
+            page.keyboard.press("Enter")
+            submit_clicked = True
+        except Exception:
+            # Last resort: use JavaScript to submit
+            print(f"  [login] Falling back to JS form submit...")
+            try:
+                page.evaluate("() => { document.querySelector('form')?.submit(); }")
+                submit_clicked = True
+            except Exception:
+                print(f"  [login] JS submit fallback failed")
+                return False
 
     # Wait for "Stay signed in?" prompt or redirect
     page.wait_for_timeout(3000)

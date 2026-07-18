@@ -48,7 +48,7 @@ jobs:
           Write-Host "Credentials written to .credentials.json"
 
       - name: Run bing-rewardd tasks
-        run: python -m bing_rewardd.cli tasks
+        run: python -m bing_rewardd.cli --screenshot-dir debug_screenshots tasks
 
       - name: Upload debug screenshots
         if: always()
