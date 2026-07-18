@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 
 import bing_rewardd.cli as cli
-from bing_rewardd.browser import default_profile_dir
+from bing_rewardd.browser import BING_URL, default_profile_dir
 from bing_rewardd.cli import build_parser
 
 
