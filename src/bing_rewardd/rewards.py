@@ -37,7 +37,29 @@ _SIGNUP_MARKERS = (
 )
 
 
-TASKS_TYPES = ["DAILY_SET_TASK_SELECTOR", "EXPLORE_TASK_SELECTOR"]
+TASKS_TYPES = [
+    "DAILY_SET_TASK_SELECTOR",
+    "EXPLORE_TASK_SELECTOR",
+    "DAILY_HALF_UNIT_TASK_SELECTOR",
+]
+
+HALF_UNIT_TASK_TEXTS = (
+    "Quote of the day",
+    "Take today's news quiz",
+    "Complete this puzzle",
+    "Do you know the answer?",
+    "Mid-week puzzle",
+    "Try Visual Search",
+)
+
+DAILY_HALF_UNIT_TASK_SELECTOR = [
+    "a:has-text('Quote of the day')",
+    "a:has-text('Take today\\'s news quiz')",
+    "a:has-text('Complete this puzzle')",
+    "a:has-text('Do you know the answer?')",
+    "a:has-text('Mid-week puzzle')",
+    "a:has-text('Try Visual Search')",
+]
 
 REWARDS_ICON_SELECTORS = (
     "#id_rh_w",
@@ -372,6 +394,8 @@ def guide_tasks(page: Page) -> None:
             complete_explore_tasks(page, tasks)
         elif task_type == "DAILY_SET_TASK_SELECTOR":
             complete_daily_set(page, tasks)
+        elif task_type == "DAILY_HALF_UNIT_TASK_SELECTOR":
+            complete_half_unit_tasks(page, tasks)
 
     if not found_any:
         print("No Rewards tasks found in the sidebar.")
@@ -407,6 +431,26 @@ def complete_daily_set(page: Page, tasks: list[RewardTask]) -> None:
             continue
         card.click()
         sleep(random.uniform(2.0, 4.0))
+
+
+def complete_half_unit_tasks(page: Page, tasks: list[RewardTask]) -> None:
+    """Click each half-unit task link to open and mark it as done."""
+    for task in tasks:
+        selector = task.selector
+        if not _is_visible(selector):
+            continue
+        if task.status == "complete":
+            print(f"  [half-unit] Skipping completed task '{task.title}'")
+            continue
+        print(f"  [half-unit] Clicking '{task.title}'...")
+        selector.click(timeout=5000)
+        sleep(random.uniform(3.0, 6.0))
+        # Close the task overlay/page if it opened
+        try:
+            page.locator("button:has-text('Close'), a:has-text('Close')").first.click(timeout=2000)
+        except PlaywrightTimeoutError:
+            pass
+        sleep(random.uniform(1.0, 2.0))
 
 
 
