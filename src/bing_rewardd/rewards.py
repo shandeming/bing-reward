@@ -9,6 +9,7 @@ from urllib.parse import quote_plus
 from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
 
 from bing_rewardd.browser import BING_URL
+from bing_rewardd.config import load_credentials
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,19 @@ class RewardTask:
 
 class RewardsSidebarError(RuntimeError):
     """Raised when the Bing Rewards sidebar cannot be opened or found."""
+
+
+class NotLoggedInError(RuntimeError):
+    """Raised when the user is not signed in to Microsoft Rewards."""
+
+
+_SIGNUP_MARKERS = (
+    "get started",
+    "sign in to earn",
+    "sign in to redeem",
+    "earn points just for using bing",
+    "redeem them for gift cards",
+)
 
 
 TASKS_TYPES = ["DAILY_SET_TASK_SELECTOR", "EXPLORE_TASK_SELECTOR"]
@@ -93,6 +107,11 @@ def open_rewards_sidebar(page: Page) -> Locator:
         raise RewardsSidebarError(
             "Could not find the Bing Rewards sidebar after clicking the upper-right Rewards icon."
         )
+    if not _is_signed_in_to_rewards(page):
+        raise NotLoggedInError(
+            "Not signed in to Microsoft Rewards. Open Bing in the browser, sign in, "
+            "then re-run bing-rewardd tasks."
+        )
     return sidebar
 
 
@@ -128,6 +147,19 @@ def find_rewards_sidebar(page: Page) -> Locator | None:
                 return candidate
 
     return None
+
+
+def _is_signed_in_to_rewards(page: Page) -> bool:
+    """Check whether the Rewards sidebar iframe shows tasks, not a sign-up CTA."""
+    sidebar = find_rewards_sidebar(page)
+    if sidebar is None:
+        return False
+    task_scope = _task_locator_scope(page, sidebar)
+    try:
+        text = task_scope.locator("body").inner_text(timeout=3000).lower()
+    except Exception:
+        return True  # can't read content; assume signed in
+    return not any(marker in text for marker in _SIGNUP_MARKERS)
 
 
 def list_visible_tasks(
@@ -173,8 +205,156 @@ def list_visible_tasks(
     return tasks
 
 
+def _try_auto_login(page: Page, email: str, password: str) -> bool:
+    """Attempt to sign in to Microsoft via the login.live.com page.
+
+    Directly navigates to login.live.com/login.srf, fills email/password,
+    and verifies redirect back to Bing. Returns True if login succeeded, False otherwise.
+    """
+    try:
+        page.goto(
+            "https://login.live.com/login.srf?wa=wsignin1.0&wreply=https://cn.bing.com/",
+            wait_until="domcontentloaded",
+            timeout=15000,
+        )
+    except PlaywrightTimeoutError:
+        return False
+
+    print(f"  [login] At {page.url}, filling credentials...")
+
+    # Find email input
+    email_input = _find_email_input(page)
+    if not email_input or not _is_visible(email_input):
+        for frame in page.frames:
+            email_input = _find_email_input(frame)
+            if email_input and _is_visible(email_input):
+                break
+        else:
+            email_input = None
+
+    if not email_input:
+        print(f"  [login] No email input found at {page.url}")
+        return False
+
+    email_input.fill(email, timeout=5000)
+    print(f"  [login] Filled email, clicking Next...")
+
+    # Click Next/Submit
+    _click_submit(page)
+
+    # Wait for password input to appear
+    try:
+        page.wait_for_selector('input[type="password"]', timeout=10000)
+    except PlaywrightTimeoutError:
+        print(f"  [login] Password input did not appear after email submission")
+        return False
+
+    # Find password input
+    pw_input = _find_password_input(page)
+    if not pw_input or not _is_visible(pw_input):
+        for frame in page.frames:
+            pw_input = _find_password_input(frame)
+            if pw_input and _is_visible(pw_input):
+                break
+        else:
+            pw_input = None
+
+    if not pw_input:
+        print(f"  [login] No password input found at {page.url}")
+        return False
+
+    pw_input.fill(password, timeout=5000)
+    print(f"  [login] Filled password, submitting...")
+
+    _click_submit(page)
+
+    # Wait for "Stay signed in?" prompt or redirect
+    page.wait_for_timeout(3000)
+
+    # Check if we're on "Stay signed in?" page
+    yes_btn = page.locator("button:has-text('Yes')").first
+    if _is_visible(yes_btn):
+        print(f"  [login] Clicking 'Yes' on 'Stay signed in?' prompt...")
+        yes_btn.click(timeout=5000)
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except PlaywrightTimeoutError:
+            pass
+
+    # Verify: should be back on Bing (not on login.live.com)
+    url = page.url.lower()
+    if "login.live.com" in url:
+        print(f"  [login] Still on login.live.com: {url}")
+        return False
+
+    print(f"  [login] Success, redirected to {url}")
+    return True
+
+
+def _find_email_input(locator: Page) -> Locator | None:
+    """Find an email/text input on the page or frame."""
+    candidates = [
+        locator.locator('input[type="email"], input[name="loginfmt"]'),
+        locator.locator('input[type="text"]'),
+    ]
+    for c in candidates:
+        try:
+            if c.count() > 0 and _is_visible(c.first):
+                return c.first
+        except Exception:
+            continue
+    return None
+
+
+def _find_password_input(locator: Page) -> Locator | None:
+    pw = locator.locator('input[type="password"]')
+    try:
+        if pw.count() > 0 and _is_visible(pw.first):
+            return pw.first
+    except Exception:
+        pass
+    return None
+
+
+def _click_submit(locator: Page) -> None:
+    submit_candidates = [
+        "input[type='submit']",
+        "button[type='submit']",
+        "input[id='idSIButton9']",
+        "input[id='id_btnNext']",
+        "button:has-text('Next')",
+        "button:has-text('Sign in')",
+    ]
+    for selector in submit_candidates:
+        loc = locator.locator(selector)
+        if _is_visible(loc.first):
+            loc.first.click(timeout=5000)
+            return
+
+
 def guide_tasks(page: Page) -> None:
-    sidebar = open_rewards_sidebar(page)
+    try:
+        sidebar = open_rewards_sidebar(page)
+    except NotLoggedInError:
+        print("[!] Not signed in. Attempting auto-login...")
+        creds = load_credentials()
+        if not creds:
+            print(
+                "[!] No credentials found. Create .credentials.json with "
+                "email/password, or sign in manually, then re-run."
+            )
+            return
+        if _try_auto_login(page, creds["email"], creds["password"]):
+            print("[✓] Logged in. Retrying tasks...")
+            guide_tasks(page)
+            return
+        print("[!] Auto-login failed. Please sign in manually, then re-run.")
+        return
+    except RewardsSidebarError as exc:
+        print(f"[!] {exc}")
+        return
+
+    found_any = False
     for task_type in TASKS_TYPES:
         selector_list = globals().get(task_type)
         if not selector_list:
@@ -182,6 +362,7 @@ def guide_tasks(page: Page) -> None:
         tasks = list_visible_tasks(page, selector_list, sidebar=sidebar)
         if not tasks:
             continue
+        found_any = True
 
         print(f"Detected {len(tasks)} {task_type.replace('_', ' ').title()}s:")
         for task in tasks:
@@ -191,6 +372,9 @@ def guide_tasks(page: Page) -> None:
             complete_explore_tasks(page, tasks)
         elif task_type == "DAILY_SET_TASK_SELECTOR":
             complete_daily_set(page, tasks)
+
+    if not found_any:
+        print("No Rewards tasks found in the sidebar.")
 
 
 def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:

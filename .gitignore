@@ -20,3 +20,4 @@ browser-profile.zip
 .github/browser-profile.zip.enc
 
 .vscode/
+.credentials.json

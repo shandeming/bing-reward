@@ -40,6 +40,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional directory for a final browser screenshot.",
     )
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run the browser in headless mode (no visible window).",
+    )
+    parser.add_argument(
+        "--extra-args",
+        nargs="*",
+        help="Extra arguments to pass to the browser (e.g. --extra-args --no-sandbox).",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
@@ -51,7 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config = BrowserConfig(profile_dir=args.profile_dir, slow_mo_ms=args.slow_mo)
+    config = BrowserConfig(
+        profile_dir=args.profile_dir,
+        headless=args.headless,
+        slow_mo_ms=args.slow_mo,
+        extra_args=args.extra_args or [],
+    )
 
     with launch_persistent_browser(config) as context:
         page = open_url(context, BING_URL)
