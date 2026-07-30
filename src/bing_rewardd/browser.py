@@ -7,7 +7,15 @@ from typing import Iterator
 
 from playwright.sync_api import BrowserContext, Error, Page, Playwright, sync_playwright
 
-BING_URL = "https://www.bing.com"
+BING_URL = (
+    "https://cn.bing.com/"
+    "?features=vstooltip"
+    "&form=ML2XYA"
+    "&OCID=ML2XYA"
+    "&PUBL=RewardsDO"
+    "&CREA=ML2XYA"
+    "&rdr=1"
+)
 
 
 @dataclass(frozen=True)

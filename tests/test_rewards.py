@@ -111,6 +111,18 @@ def test_infer_status_complete_from_completed_text() -> None:
     assert _infer_status("Task completed") == "complete"
 
 
+def test_infer_status_not_complete_for_task_name_with_complete() -> None:
+    """Task names containing 'Complete' (e.g. 'Complete this puzzle') are not marked done."""
+    assert _infer_status("Complete this puzzle") == "visible"
+
+
+def test_infer_status_complete_for_status_indicator() -> None:
+    """Status phrases like 'is complete' or trailing 'complete' are still detected."""
+    assert _infer_status("Daily poll is complete") == "complete"
+    assert _infer_status("Task marked complete") == "complete"
+    assert _infer_status("Puzzle complete") == "complete"
+
+
 def test_rewards_icon_selector_prioritizes_bing_icon_id() -> None:
     assert REWARDS_ICON_SELECTORS[0] == "#id_rh_w"
     assert "[aria-label='Microsoft Rewards']" in REWARDS_ICON_SELECTORS

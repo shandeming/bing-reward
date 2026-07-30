@@ -120,7 +120,7 @@ def open_rewards_sidebar(page: Page) -> Locator:
         click_rewards_icon(page, raise_on_missing=True)
 
     try:
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(5000)
     except PlaywrightTimeoutError:
         pass
 
@@ -520,13 +520,37 @@ def complete_half_unit_tasks(page: Page, tasks: list[RewardTask]) -> None:
             continue
         print(f"  [half-unit] Clicking '{task.title}'...")
         selector.click(timeout=5000)
-        sleep(random.uniform(3.0, 6.0))
-        # Close the task overlay/page if it opened
+        sleep(random.uniform(1.0, 2.0))
+        # Half-unit tasks often open a new page/tab instead of an overlay.
+        # Check if a new page appeared; if so, briefly visit it then close it.
+        # (The actual completion tracking is done server-side on click.)
         try:
-            page.locator("button:has-text('Close'), a:has-text('Close')").first.click(timeout=2000)
+            page.wait_for_timeout(2000)
+            # Check if a new page was opened
+            context = page.context
+            new_pages = [p for p in context.pages if p != page and not p.is_closed()]
+            if new_pages:
+                new_page = new_pages[0]
+                print(f"  [half-unit] New page opened: {new_page.url}")
+                # Give the page a moment to render
+                try:
+                    new_page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except PlaywrightTimeoutError:
+                    pass
+                sleep(random.uniform(2.0, 4.0))
+                # Close the new page and return to original
+                new_page.close()
+                page.bring_to_front()
+                sleep(random.uniform(1.0, 2.0))
+            else:
+                # No new page — try closing any overlay on the current page
+                try:
+                    page.locator("button:has-text('Close'), a:has-text('Close')").first.click(timeout=2000)
+                except PlaywrightTimeoutError:
+                    pass
+                sleep(random.uniform(1.0, 2.0))
         except PlaywrightTimeoutError:
             pass
-        sleep(random.uniform(1.0, 2.0))
 
 
 
@@ -639,7 +663,20 @@ def _looks_like_rewards_sidebar(page: Page, locator: Locator) -> bool:
 
 def _infer_status(text: str) -> str:
     lowered = text.lower()
-    if "complete" in lowered or "completed" in lowered:
+    # Only treat "complete" as done when it appears as a status indicator,
+    # not as part of a task name like "Complete this puzzle".
+    # Check for patterns like "is complete", "marked complete", "completed"
+    # or when "complete" appears at the end of the text.
+    status_complete = any(
+        marker in lowered
+        for marker in (
+            "is complete",
+            "marked complete",
+            "is completed",
+            "completed",
+        )
+    ) or lowered.endswith("complete")
+    if status_complete:
         return "complete"
     if "points" in lowered or "pts" in lowered or "+" in lowered:
         return "available"

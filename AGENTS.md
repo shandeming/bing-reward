@@ -37,6 +37,16 @@ Tests are pure unit tests — no browser required. Uses monkeypatching and fake 
 - Browser closes immediately after command finishes (no user input required)
 - CI (`.github/workflows/daily.yml`): self-hosted Windows runner, daily at 09:00 Asia/Shanghai (UTC 01:00), 30-min timeout
 
+## Playwright-based testing & layout awareness
+
+Whenever a feature or fix touches page interaction, **always use Playwright to visually inspect the live page** — don't guess about DOM layout from code alone. Open the browser, load `cn.bing.com` with the same query params the code uses, and verify:
+- Selector paths actually match visible elements
+- Lazy-loaded content renders within expected timeout windows
+- Sidebar/flyout structure matches what the code assumes
+- Any new page behavior (animations, overlays, JS transitions) is accounted for
+
+This catches drift between code assumptions and real-world page state before it breaks at runtime.
+
 ## Architecture notes
 
 - `browser.py` — Playwright context management, Chrome/Chromium fallback
