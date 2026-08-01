@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-import json
 from pathlib import Path
 from typing import Iterator
 
-from playwright.sync_api import BrowserContext, Error, Page, Playwright, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Error, Page, Playwright, sync_playwright
 
 BING_URL = (
     "https://cn.bing.com/"
@@ -21,91 +20,46 @@ BING_URL = (
 
 @dataclass(frozen=True)
 class BrowserConfig:
-    profile_dir: Path
     headless: bool = False
     slow_mo_ms: int = 0
     extra_args: list[str] = field(default_factory=list)
     storage_state: Path | None = None
 
 
-def default_profile_dir(base_dir: Path | None = None) -> Path:
+def default_storage_state_path(base_dir: Path | None = None) -> Path:
     root = base_dir or Path.cwd()
-    return root / ".browser-profile"
+    return root / "storage_state.json"
 
 
 @contextmanager
-def launch_persistent_browser(config: BrowserConfig) -> Iterator[BrowserContext]:
-    config.profile_dir.mkdir(parents=True, exist_ok=True)
-
+def launch_browser(config: BrowserConfig) -> Iterator[BrowserContext]:
     with sync_playwright() as playwright:
-        context = _launch_with_preferred_channel(playwright, config)
+        browser = _launch_with_preferred_channel(playwright, config)
+        context_args: dict[str, object] = {
+            "viewport": {"width": 1280, "height": 900},
+        }
+        if config.storage_state and config.storage_state.exists():
+            context_args["storage_state"] = str(config.storage_state)
+        context = browser.new_context(**context_args)
         try:
-            if config.storage_state:
-                _apply_storage_state(context, config.storage_state)
             yield context
         finally:
             context.close()
-
-
-def _apply_storage_state(context: BrowserContext, path: Path) -> None:
-    """Restore cookies and localStorage without copying a whole browser profile."""
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Unable to read storage state: {path}") from exc
-
-    if not isinstance(state, dict):
-        raise ValueError("Storage state must be a JSON object")
-
-    cookies = state.get("cookies", [])
-    if not isinstance(cookies, list):
-        raise ValueError("Storage state cookies must be a list")
-    if cookies:
-        context.add_cookies(cookies)
-
-    # launch_persistent_context does not accept Playwright's storage_state
-    # option, so install localStorage before the first navigation instead.
-    local_storage_by_origin: dict[str, dict[str, str]] = {}
-    for origin in state.get("origins", []):
-        if not isinstance(origin, dict) or not isinstance(origin.get("origin"), str):
-            continue
-        entries = origin.get("localStorage", [])
-        if not isinstance(entries, list):
-            continue
-        local_storage_by_origin[origin["origin"]] = {
-            item["name"]: item["value"]
-            for item in entries
-            if isinstance(item, dict)
-            and isinstance(item.get("name"), str)
-            and isinstance(item.get("value"), str)
-        }
-
-    if local_storage_by_origin:
-        context.add_init_script(
-            "const storage = "
-            + json.dumps(local_storage_by_origin)
-            + "; const values = storage[location.origin];"
-            + " if (values) Object.entries(values).forEach(([key, value]) => "
-            + "localStorage.setItem(key, value));"
-        )
+            browser.close()
 
 
 def _launch_with_preferred_channel(
     playwright: Playwright, config: BrowserConfig
-) -> BrowserContext:
+) -> Browser:
     launch_args = {
-        "user_data_dir": str(config.profile_dir),
         "headless": config.headless,
         "slow_mo": config.slow_mo_ms,
-        "viewport": {"width": 1280, "height": 900},
     }
     if config.extra_args:
         launch_args["args"] = config.extra_args
 
     try:
-        return playwright.chromium.launch_persistent_context(
-            channel="chrome", **launch_args
-        )
+        return playwright.chromium.launch(channel="chrome", **launch_args)
     except Error as exc:
         chrome_missing = "Chromium distribution 'chrome' is not found" in str(exc)
         if not chrome_missing:
@@ -113,7 +67,7 @@ def _launch_with_preferred_channel(
             print(f"[!] Chrome channel crashed ({type(exc).__name__}); falling back to bundled Chromium.")
         else:
             print("[!] Chrome channel not found; falling back to bundled Chromium.")
-        return playwright.chromium.launch_persistent_context(**launch_args)
+        return playwright.chromium.launch(**launch_args)
 
 
 def active_page(context: BrowserContext) -> Page:

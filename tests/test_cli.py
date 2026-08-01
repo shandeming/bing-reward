@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 
 import bing_rewardd.cli as cli
-from bing_rewardd.browser import BING_URL, default_profile_dir
+from bing_rewardd.browser import BING_URL, default_storage_state_path
 from bing_rewardd.cli import build_parser
 
 
@@ -30,16 +30,20 @@ def test_parser_accepts_storage_state_options() -> None:
     assert args.save_storage_state == Path("out.json")
 
 
-def test_default_profile_dir_uses_project_local_directory(tmp_path: Path) -> None:
-    assert default_profile_dir(tmp_path) == tmp_path / ".browser-profile"
+def test_default_storage_state_path_uses_project_local_file(tmp_path: Path) -> None:
+    assert default_storage_state_path(tmp_path) == tmp_path / "storage_state.json"
 
 
 def test_tasks_command_opens_bing_before_guiding_tasks(monkeypatch) -> None:
     calls: list[str] = []
 
+    class FakeContext:
+        def storage_state(self, *, path: str) -> None:
+            calls.append(f"save:{path}")
+
     @contextmanager
     def fake_launch_persistent_browser(config):
-        yield object()
+        yield FakeContext()
 
     def fake_open_url(context, url: str):
         calls.append(url)
@@ -48,8 +52,8 @@ def test_tasks_command_opens_bing_before_guiding_tasks(monkeypatch) -> None:
     def fake_guide_tasks(page):
         calls.append("tasks")
 
-    monkeypatch.setattr(cli, "launch_persistent_browser", fake_launch_persistent_browser)
+    monkeypatch.setattr(cli, "launch_browser", fake_launch_persistent_browser)
     monkeypatch.setattr(cli, "open_url", fake_open_url)
     monkeypatch.setattr(cli, "guide_tasks", fake_guide_tasks)
     assert cli.main(["tasks"]) == 0
-    assert calls == [BING_URL, "tasks"]
+    assert calls == [BING_URL, "tasks", f"save:{default_storage_state_path()}"]

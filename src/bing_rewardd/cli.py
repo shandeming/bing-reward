@@ -6,8 +6,8 @@ from pathlib import Path
 from bing_rewardd.browser import (
     BING_URL,
     BrowserConfig,
-    default_profile_dir,
-    launch_persistent_browser,
+    default_storage_state_path,
+    launch_browser,
     open_url,
 )
 from bing_rewardd.rewards import guide_tasks
@@ -17,12 +17,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bing-rewardd",
         description="Open Bing and guide Microsoft Rewards tasks with explicit user confirmation.",
-    )
-    parser.add_argument(
-        "--profile-dir",
-        type=Path,
-        default=default_profile_dir(),
-        help="Persistent browser profile directory. Defaults to .browser-profile.",
     )
     parser.add_argument(
         "--slow-mo",
@@ -48,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--storage-state",
         type=Path,
+        default=default_storage_state_path(),
         help="Load cookies and localStorage from a Playwright storage-state JSON file.",
     )
     parser.add_argument(
@@ -72,14 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = BrowserConfig(
-        profile_dir=args.profile_dir,
         headless=args.headless,
         slow_mo_ms=args.slow_mo,
         extra_args=args.extra_args or [],
         storage_state=args.storage_state,
     )
 
-    with launch_persistent_browser(config) as context:
+    with launch_browser(config) as context:
         page = open_url(context, BING_URL)
 
         try:
@@ -90,9 +84,10 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if args.screenshot_dir:
                 _save_final_screenshot(page, args.screenshot_dir)
-            if args.save_storage_state:
-                args.save_storage_state.parent.mkdir(parents=True, exist_ok=True)
-                context.storage_state(path=str(args.save_storage_state))
+            save_path = args.save_storage_state or args.storage_state
+            if save_path:
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(save_path))
 
     return 0
 

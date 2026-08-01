@@ -20,7 +20,7 @@ python -m playwright install chromium
 |---------|--------|
 | `bing-rewardd tasks` | Detect and complete all visible Rewards tasks |
 
-Flags: `--profile-dir` (default `.browser-profile`), `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`
+Flags: `--storage-state FILE` (default `storage_state.json`), `--save-storage-state FILE`, `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`
 
 ## Running tests
 
@@ -32,10 +32,12 @@ Tests are pure unit tests — no browser required. Uses monkeypatching and fake 
 
 ## Browser behavior
 
-- Runs **visible** (not headless), persistent Chrome profile at `.browser-profile/`
+- Runs **visible** (not headless) by default
+- Local and GitHub Actions both use Playwright `storage_state.json` for cookies and localStorage; no persistent browser profile is used
 - Tries `channel="chrome"` first; falls back to Chromium if Chrome not found
 - Browser closes immediately after command finishes (no user input required)
-- CI (`.github/workflows/daily.yml`): self-hosted Windows runner, daily at 09:00 Asia/Shanghai (UTC 01:00), 30-min timeout
+- CI (`.github/workflows/daily.yml`): `windows-latest`, visible browser, daily at 09:00 Asia/Shanghai (UTC 01:00), 20-min timeout
+- CI receives the Base64-encoded `storage_state.json` through the `BING_STORAGE_STATE_B64` repository Secret
 
 ## Playwright-based testing & layout awareness
 
@@ -49,8 +51,8 @@ This catches drift between code assumptions and real-world page state before it 
 
 ## Architecture notes
 
-- `browser.py` — Playwright context management, Chrome/Chromium fallback
+- `browser.py` — Playwright context management, Chrome/Chromium fallback, storage-state restore
 - `rewards.py` — All Rewards-sidebar interaction (sidebar detection by DOM scoring, task listing, click-through, search submission)
 - `cli.py` — Argparse-based CLI glue
 - No lint/formatter/typecheck config exists; no pre-commit hooks
-- All credentials handled via live browser login (not stored by code)
+- Login state is never committed to the repository; treat `storage_state.json` and `BING_STORAGE_STATE_B64` as credentials
