@@ -48,7 +48,7 @@ jobs:
           )
 
       - name: Run bing-rewardd tasks
-        run: python -m bing_rewardd.cli --headless --storage-state .auth/storage_state.json --screenshot-dir debug_screenshots tasks
+        run: python -m bing_rewardd.cli --storage-state .auth/storage_state.json --screenshot-dir debug_screenshots tasks
 
       - name: Upload debug screenshots
         if: always()
