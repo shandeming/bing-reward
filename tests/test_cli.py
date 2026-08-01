@@ -21,6 +21,15 @@ def test_parser_accepts_screenshot_dir() -> None:
     assert args.screenshot_dir == Path("shots")
 
 
+def test_parser_accepts_storage_state_options() -> None:
+    args = build_parser().parse_args(
+        ["--storage-state", "in.json", "--save-storage-state", "out.json", "tasks"]
+    )
+
+    assert args.storage_state == Path("in.json")
+    assert args.save_storage_state == Path("out.json")
+
+
 def test_default_profile_dir_uses_project_local_directory(tmp_path: Path) -> None:
     assert default_profile_dir(tmp_path) == tmp_path / ".browser-profile"
 

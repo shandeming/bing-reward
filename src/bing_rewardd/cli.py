@@ -46,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the browser in headless mode (no visible window).",
     )
     parser.add_argument(
+        "--storage-state",
+        type=Path,
+        help="Load cookies and localStorage from a Playwright storage-state JSON file.",
+    )
+    parser.add_argument(
+        "--save-storage-state",
+        type=Path,
+        help="Save the current cookies and localStorage to a Playwright storage-state JSON file.",
+    )
+    parser.add_argument(
         "--extra-args",
         nargs="*",
         help="Extra arguments to pass to the browser (e.g. --extra-args --no-sandbox).",
@@ -66,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         headless=args.headless,
         slow_mo_ms=args.slow_mo,
         extra_args=args.extra_args or [],
+        storage_state=args.storage_state,
     )
 
     with launch_persistent_browser(config) as context:
@@ -79,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if args.screenshot_dir:
                 _save_final_screenshot(page, args.screenshot_dir)
+            if args.save_storage_state:
+                args.save_storage_state.parent.mkdir(parents=True, exist_ok=True)
+                context.storage_state(path=str(args.save_storage_state))
 
     return 0
 
