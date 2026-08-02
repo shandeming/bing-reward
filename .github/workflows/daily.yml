@@ -2,8 +2,7 @@ name: Daily
 
 on:
   schedule:
-    # Temporary test: runs every day at 12:18 Asia/Shanghai (04:18 UTC).
-    - cron: "24 4 * * *"
+    - cron: "36 4 * * *"
   workflow_dispatch:
 
 jobs:
