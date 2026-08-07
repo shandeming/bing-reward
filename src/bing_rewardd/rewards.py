@@ -43,22 +43,8 @@ TASKS_TYPES = [
     "DAILY_HALF_UNIT_TASK_SELECTOR",
 ]
 
-HALF_UNIT_TASK_TEXTS = (
-    "Quote of the day",
-    "Take today's news quiz",
-    "Complete this puzzle",
-    "Do you know the answer?",
-    "Mid-week puzzle",
-    "Try Visual Search",
-)
-
 DAILY_HALF_UNIT_TASK_SELECTOR = [
-    "a:has-text('Quote of the day')",
-    "a:has-text('Take today\\'s news quiz')",
-    "a:has-text('Complete this puzzle')",
-    "a:has-text('Do you know the answer?')",
-    "a:has-text('Mid-week puzzle')",
-    "a:has-text('Try Visual Search')",
+    "div.promo_cont.slim",
 ]
 
 REWARDS_ICON_SELECTORS = (
@@ -196,7 +182,7 @@ def list_visible_tasks(
     locator_scope = _task_locator_scope(page, task_scope)
 
     tasks: list[RewardTask] = []
-    seen_titles: set[str] = set()
+    seen_elements: set[str] = set()
 
     for selector in selector_list:
         locator = locator_scope.locator(selector)
@@ -210,11 +196,19 @@ def list_visible_tasks(
             if not _is_visible(item):
                 continue
 
+            try:
+                elem_key = item.evaluate("el => el.outerHTML") if hasattr(item, "evaluate") else id(item)
+            except Exception:
+                elem_key = str(i)
+
+            if elem_key in seen_elements:
+                continue
+            seen_elements.add(elem_key)
+
             title = _clean_text(item)
-            if not title or title in seen_titles or not _is_task_like(title):
+            if not title or not _is_task_like(title):
                 continue
 
-            seen_titles.add(title)
             tasks.append(
                 RewardTask(
                     index=len(tasks) + 1,
