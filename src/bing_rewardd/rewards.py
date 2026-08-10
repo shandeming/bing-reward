@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import random
+from dataclasses import dataclass
 from time import sleep
 from typing import Any
-from urllib.parse import quote_plus
 
-from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Locator, Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from bing_rewardd.browser import BING_URL
 from bing_rewardd.config import load_credentials
@@ -44,7 +44,7 @@ TASKS_TYPES = [
 ]
 
 DAILY_HALF_UNIT_TASK_SELECTOR = [
-    "div.promo_cont.slim",
+    "div.promo_cont",
 ]
 
 REWARDS_ICON_SELECTORS = (
@@ -197,7 +197,11 @@ def list_visible_tasks(
                 continue
 
             try:
-                elem_key = item.evaluate("el => el.outerHTML") if hasattr(item, "evaluate") else id(item)
+                elem_key = (
+                    item.evaluate("el => el.outerHTML")
+                    if hasattr(item, "evaluate")
+                    else id(item)
+                )
             except Exception:
                 elem_key = str(i)
 
@@ -253,7 +257,7 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
         return False
 
     email_input.fill(email, timeout=5000)
-    print(f"  [login] Filled email, clicking Next...")
+    print("  [login] Filled email, clicking Next...")
 
     # Click Next/Submit - try multiple selectors in order
     submit_clicked = False
@@ -277,25 +281,25 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
 
     if not submit_clicked:
         # Fallback: try pressing Enter to submit
-        print(f"  [login] Falling back to Enter key submit...")
+        print("  [login] Falling back to Enter key submit...")
         try:
             page.keyboard.press("Enter")
             submit_clicked = True
         except Exception:
             # Last resort: use JavaScript to submit
-            print(f"  [login] Falling back to JS form submit...")
+            print("  [login] Falling back to JS form submit...")
             try:
                 page.evaluate("() => { document.querySelector('form')?.submit(); }")
                 submit_clicked = True
             except Exception:
-                print(f"  [login] JS submit fallback failed")
+                print("  [login] JS submit fallback failed")
                 return False
 
     # Wait for password input to appear (give extra time for page transition)
     try:
         page.wait_for_selector('input[type="password"]', timeout=15000)
     except PlaywrightTimeoutError:
-        print(f"  [login] Password input did not appear after email submission")
+        print("  [login] Password input did not appear after email submission")
         # Debug: show what buttons/inputs are on the page
         try:
             btns = page.locator("button, input[type='submit']").count()
@@ -322,7 +326,7 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
         return False
 
     pw_input.fill(password, timeout=5000)
-    print(f"  [login] Filled password, submitting...")
+    print("  [login] Filled password, submitting...")
 
     # Click Sign in / Submit - try multiple selectors
     submit_clicked = False
@@ -346,18 +350,18 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
 
     if not submit_clicked:
         # Fallback: try pressing Enter to submit
-        print(f"  [login] Falling back to Enter key submit...")
+        print("  [login] Falling back to Enter key submit...")
         try:
             page.keyboard.press("Enter")
             submit_clicked = True
         except Exception:
             # Last resort: use JavaScript to submit
-            print(f"  [login] Falling back to JS form submit...")
+            print("  [login] Falling back to JS form submit...")
             try:
                 page.evaluate("() => { document.querySelector('form')?.submit(); }")
                 submit_clicked = True
             except Exception:
-                print(f"  [login] JS submit fallback failed")
+                print("  [login] JS submit fallback failed")
                 return False
 
     # Wait for "Stay signed in?" prompt or redirect
@@ -366,7 +370,7 @@ def _try_auto_login(page: Page, email: str, password: str) -> bool:
     # Check if we're on "Stay signed in?" page
     yes_btn = page.locator("button:has-text('Yes')").first
     if _is_visible(yes_btn):
-        print(f"  [login] Clicking 'Yes' on 'Stay signed in?' prompt...")
+        print("  [login] Clicking 'Yes' on 'Stay signed in?' prompt...")
         yes_btn.click(timeout=5000)
         try:
             page.wait_for_load_state("domcontentloaded", timeout=10000)
@@ -539,15 +543,14 @@ def complete_half_unit_tasks(page: Page, tasks: list[RewardTask]) -> None:
             else:
                 # No new page — try closing any overlay on the current page
                 try:
-                    page.locator("button:has-text('Close'), a:has-text('Close')").first.click(timeout=2000)
+                    page.locator(
+                        "button:has-text('Close'), a:has-text('Close')"
+                    ).first.click(timeout=2000)
                 except PlaywrightTimeoutError:
                     pass
                 sleep(random.uniform(1.0, 2.0))
         except PlaywrightTimeoutError:
             pass
-
-
-
 
 
 def search_for_term(page: Page, term: str) -> None:
