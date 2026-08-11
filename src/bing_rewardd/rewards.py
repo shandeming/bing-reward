@@ -455,6 +455,10 @@ def guide_tasks(page: Page) -> None:
         selector_list = globals().get(task_type)
         if not selector_list:
             continue
+        try:
+            sidebar = open_rewards_sidebar(page)
+        except RewardsSidebarError:
+            continue
         tasks = list_visible_tasks(page, selector_list, sidebar=sidebar)
         if not tasks:
             continue
