@@ -7,15 +7,7 @@ from typing import Iterator
 
 from playwright.sync_api import Browser, BrowserContext, Error, Page, Playwright, sync_playwright
 
-BING_URL = (
-    "https://cn.bing.com/"
-    "?features=vstooltip"
-    "&form=ML2XYA"
-    "&OCID=ML2XYA"
-    "&PUBL=RewardsDO"
-    "&CREA=ML2XYA"
-    "&rdr=1"
-)
+BING_URL = "https://cn.bing.com/"
 
 
 @dataclass(frozen=True)
@@ -31,6 +23,27 @@ def default_storage_state_path(base_dir: Path | None = None) -> Path:
     return root / "storage_state.json"
 
 
+_ANTI_DETECT_SCRIPT = """
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+"""
+
+_BING_AUTH_FIX_SCRIPT = """
+    try {
+        var key = 'digital-id-cache';
+        var raw = localStorage.getItem(key);
+        if (raw) {
+            var cached = JSON.parse(raw);
+            if (cached && cached.at === 'NA' && cached.muid) {
+                cached.at = 'MSA';
+                cached.it = 'Web';
+                cached.lastUpdated = Date.now();
+                localStorage.setItem(key, JSON.stringify(cached));
+            }
+        }
+    } catch (e) {}
+"""
+
+
 @contextmanager
 def launch_browser(config: BrowserConfig) -> Iterator[BrowserContext]:
     with sync_playwright() as playwright:
@@ -41,6 +54,8 @@ def launch_browser(config: BrowserConfig) -> Iterator[BrowserContext]:
         if config.storage_state and config.storage_state.exists():
             context_args["storage_state"] = str(config.storage_state)
         context = browser.new_context(**context_args)
+        context.add_init_script(_ANTI_DETECT_SCRIPT)
+        context.add_init_script(_BING_AUTH_FIX_SCRIPT)
         try:
             yield context
         finally:

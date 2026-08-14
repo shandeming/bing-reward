@@ -36,16 +36,23 @@ _SIGNUP_MARKERS = (
     "redeem them for gift cards",
 )
 
+DAILY_SET_SECTION_HEADING = "Daily set"
+KEEP_EARNING_SECTION_HEADING = "Keep earning"
 
-TASKS_TYPES = [
-    "DAILY_SET_TASK_SELECTOR",
-    "EXPLORE_TASK_SELECTOR",
-    "DAILY_HALF_UNIT_TASK_SELECTOR",
+# --- Legacy CSS selectors (pre-2026 React sidebar) ---
+DAILY_SET_TASK_SELECTOR = ["#daily_set_card .promo_cont"]
+EXPLORE_TASK_SELECTOR = [
+    "#exb-activityChecklist .promo_cont[data-is-inprogress-enabled='yes']"
 ]
+DAILY_HALF_UNIT_TASK_SELECTOR = ["div.promo_cont"]
+LEGACY_TASK_SELECTORS = (
+    "a[href]",
+    "button",
+    "[role='button']",
+    "[tabindex]:not([tabindex='-1'])",
+)
+LEGACY_TASK_TYPES = ("DAILY_SET_TASK_SELECTOR", "EXPLORE_TASK_SELECTOR", "DAILY_HALF_UNIT_TASK_SELECTOR")
 
-DAILY_HALF_UNIT_TASK_SELECTOR = [
-    "div.promo_cont",
-]
 
 REWARDS_ICON_SELECTORS = (
     "#id_rh_w",
@@ -74,19 +81,6 @@ SIDEBAR_SELECTORS = (
 SEARCH_INPUT_SELECTOR = ["textarea[name='q']", "#sb_form_q"]
 
 REWARDS_FLYOUT_FRAME_SELECTOR = "#rewid-f iframe"
-
-DAILY_SET_TASK_SELECTOR = ["#daily_set_card .promo_cont"]
-
-EXPLORE_TASK_SELECTOR = [
-    "#exb-activityChecklist .promo_cont[data-is-inprogress-enabled='yes']"
-]
-
-TASK_SELECTORS = (
-    "a[href]",
-    "button",
-    "[role='button']",
-    "[tabindex]:not([tabindex='-1'])",
-)
 
 
 def wait_for_possible_login(page: Page) -> None:
@@ -172,17 +166,98 @@ def _is_signed_in_to_rewards(page: Page) -> bool:
 
 def list_visible_tasks(
     page: Page,
-    selector_list: list[str] | tuple[str, ...] = TASK_SELECTORS,
+    section_heading: str | None = None,
     sidebar: Locator | None = None,
+    selector_list: tuple[str, ...] | None = None,
     limit: int = 30,
 ) -> list[RewardTask]:
     task_scope = sidebar or find_rewards_sidebar(page)
     if task_scope is None:
         return []
+
+    if selector_list:
+        return _find_tasks_by_selectors(page, task_scope, selector_list, limit)
+
+    if section_heading:
+        frame = _get_rewards_frame(page, task_scope)
+        if frame is not None:
+            tasks = _find_cards_by_section(frame, section_heading)
+            if tasks:
+                return tasks
+        return _find_tasks_by_selectors(page, task_scope, LEGACY_TASK_SELECTORS, limit)
+
+    # Default: try new React section-based approach first, fall back to legacy selectors
+    frame = _get_rewards_frame(page, task_scope)
+    if frame is not None:
+        tasks: list[RewardTask] = []
+        for heading in (DAILY_SET_SECTION_HEADING, KEEP_EARNING_SECTION_HEADING):
+            tasks.extend(_find_cards_by_section(frame, heading))
+        if tasks:
+            return tasks
+
+    return _find_tasks_by_selectors(page, task_scope, LEGACY_TASK_SELECTORS, limit)
+
+
+def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]:
+    result = frame.locator("body").evaluate(
+        """(el, heading) => {
+            const sections = el.querySelectorAll('section');
+            for (const section of sections) {
+                if (!section.innerText.includes(heading)) continue;
+                const cards = section.querySelectorAll('a[href]');
+                return Array.from(cards).map((a, idx) => {
+                    const imgs = a.querySelectorAll('img');
+                    const titleEl = imgs[0] || a.querySelector('p:first-child');
+                    const title = (titleEl ? (titleEl.alt || titleEl.innerText) : a.innerText).trim();
+                    const descEl = a.querySelectorAll('p')[1];
+                    const desc = descEl ? descEl.innerText.trim() : '';
+                    const ptsEls = a.querySelectorAll('.text-globalBody2Strong, .text-metadata');
+                    let points = '';
+                    for (const p of ptsEls) {
+                        const t = p.innerText.trim();
+                        if (/^[+]?\\d+/.test(t)) { points = t; break; }
+                    }
+                    const completed = a.innerText.includes('Completed');
+                    return { idx, title, desc, points, completed };
+                }).filter(c => c.title.length > 2 && c.title !== 'Show more');
+            }
+            return [];
+        }""",
+        section_heading,
+        timeout=5000,
+    )
+
+    # Build the section + card locator once, share across tasks
+    section_locator = frame.locator(f"section:has-text('{section_heading}')")
+    card_locator = section_locator.locator("a[href]")
+
+    tasks: list[RewardTask] = []
+    for card in result:
+        title = f"{card['title']} | {card['desc']}" if card.get("desc") else card["title"]
+        status = "complete" if card.get("completed") else ("available" if card.get("points") else "visible")
+        card_idx = card["idx"]
+        tasks.append(
+            RewardTask(
+                index=len(tasks) + 1,
+                title=title,
+                status=status,
+                selector=card_locator.nth(card_idx),
+            )
+        )
+
+    return tasks
+
+
+def _find_tasks_by_selectors(
+    page: Page,
+    task_scope: Locator,
+    selector_list: tuple[str, ...],
+    limit: int,
+) -> list[RewardTask]:
     locator_scope = _task_locator_scope(page, task_scope)
 
     tasks: list[RewardTask] = []
-    seen_elements: set[str] = set()
+    seen: set[str] = set()
 
     for selector in selector_list:
         locator = locator_scope.locator(selector)
@@ -197,17 +272,13 @@ def list_visible_tasks(
                 continue
 
             try:
-                elem_key = (
-                    item.evaluate("el => el.outerHTML")
-                    if hasattr(item, "evaluate")
-                    else id(item)
-                )
+                elem_key = item.evaluate("el => el.outerHTML") if hasattr(item, "evaluate") else id(item)
             except Exception:
                 elem_key = str(i)
 
-            if elem_key in seen_elements:
+            if elem_key in seen:
                 continue
-            seen_elements.add(elem_key)
+            seen.add(elem_key)
 
             title = _clean_text(item)
             if not title or not _is_task_like(title):
@@ -223,6 +294,15 @@ def list_visible_tasks(
             )
 
     return tasks
+
+
+def _get_rewards_frame(page: Page, sidebar: Locator) -> Any:
+    try:
+        if sidebar.locator("iframe").count() > 0:
+            return page.frame_locator(REWARDS_FLYOUT_FRAME_SELECTOR)
+    except Exception:
+        pass
+    return None
 
 
 def _try_auto_login(page: Page, email: str, password: str) -> bool:
@@ -451,105 +531,92 @@ def guide_tasks(page: Page) -> None:
         return
 
     found_any = False
-    for task_type in TASKS_TYPES:
-        selector_list = globals().get(task_type)
-        if not selector_list:
-            continue
+
+    # 1. Bing Search Streak: do a search (works for both old and new sidebar)
+    print("Completing Bing Search streak...")
+    search_for_term(page, "weather")
+    sleep(random.uniform(3.0, 5.0))
+    try:
+        page.locator("#est_en").first.click(timeout=2000)
+    except PlaywrightTimeoutError:
+        pass
+    sleep(random.uniform(2.0, 4.0))
+    found_any = True
+
+    # 2. Try new React section-based approach first
+    for heading, label in [
+        (DAILY_SET_SECTION_HEADING, "Daily Set"),
+        (KEEP_EARNING_SECTION_HEADING, "Keep Earning"),
+    ]:
         try:
             sidebar = open_rewards_sidebar(page)
         except RewardsSidebarError:
             continue
-        tasks = list_visible_tasks(page, selector_list, sidebar=sidebar)
-        if not tasks:
-            continue
-        found_any = True
+        tasks = list_visible_tasks(page, section_heading=heading, sidebar=sidebar)
+        if tasks:
+            found_any = True
+            print(f"Detected {len(tasks)} {label} tasks:")
+            for task in tasks:
+                print(f"  {task.index}. {task.title} [{task.status}]")
+            complete_section_tasks(page, tasks, label.lower().replace(" ", "-"))
 
-        print(f"Detected {len(tasks)} {task_type.replace('_', ' ').title()}s:")
-        for task in tasks:
-            print(f"{task.index}. {task.title} [{task.status}]")
-
-        if task_type == "EXPLORE_TASK_SELECTOR":
-            complete_explore_tasks(page, tasks)
-        elif task_type == "DAILY_SET_TASK_SELECTOR":
-            complete_daily_set(page, tasks)
-        elif task_type == "DAILY_HALF_UNIT_TASK_SELECTOR":
-            complete_half_unit_tasks(page, tasks)
+    # 3. If nothing found via new approach, try legacy CSS selectors
+    if not found_any:
+        for task_type in LEGACY_TASK_TYPES:
+            selector_list = globals().get(task_type)
+            if not selector_list:
+                continue
+            try:
+                sidebar = open_rewards_sidebar(page)
+            except RewardsSidebarError:
+                continue
+            tasks = list_visible_tasks(page, selector_list=tuple(selector_list), sidebar=sidebar)
+            if not tasks:
+                continue
+            found_any = True
+            task_label = task_type.replace("_TASK_SELECTOR", "").replace("_", " ").lower()
+            print(f"Detected {len(tasks)} {task_label.title()} tasks:")
+            for task in tasks:
+                print(f"  {task.index}. {task.title} [{task.status}]")
+            complete_section_tasks(page, tasks, task_label)
 
     if not found_any:
         print("No Rewards tasks found in the sidebar.")
 
 
-def complete_explore_tasks(page: Page, tasks: list[RewardTask]) -> None:
-    # activate each task, then do searches for each task
+def complete_section_tasks(page: Page, tasks: list[RewardTask], section_label: str) -> None:
     for task in tasks:
-        selector = task.selector
-        if not _is_visible(selector):
-            continue
-        task.selector.click(timeout=5000)
-        sleep(random.uniform(2.0, 4.0))
-    search_for_term(page, "weather")
-    page.click("#est_en")
-    for task in tasks:
-        search_term = task.title.split("|")[-1].strip().split("Search on Bing")[-1]
-        search_for_term(page, search_term)
-        sleep(random.uniform(2.0, 4.0))
-
-
-def complete_daily_set(page: Page, tasks: list[RewardTask]) -> None:
-    count = len(tasks)
-    for i in range(count):
-        sidebar = open_rewards_sidebar(page)
-        tasks = list_visible_tasks(page, DAILY_SET_TASK_SELECTOR, sidebar=sidebar)
-        card = tasks[i].selector if i < len(tasks) else None
-        if not card or not _is_visible(card):
-            continue
-        label = card.get_attribute("aria-label") or ""
-        status = label.split(" - Offer ")[-1] if " - Offer " in label else ""
-        if "is" in status.lower():
-            continue
-        card.click()
-        sleep(random.uniform(2.0, 4.0))
-
-
-def complete_half_unit_tasks(page: Page, tasks: list[RewardTask]) -> None:
-    """Click each half-unit task link to open and mark it as done."""
-    for task in tasks:
-        selector = task.selector
-        if not _is_visible(selector):
-            continue
         if task.status == "complete":
-            print(f"  [half-unit] Skipping completed task '{task.title}'")
+            print(f"  [{section_label}] Skipping completed '{task.title}'")
             continue
-        print(f"  [half-unit] Clicking '{task.title}'...")
-        selector.click(timeout=5000)
-        sleep(random.uniform(1.0, 2.0))
-        # Half-unit tasks often open a new page/tab instead of an overlay.
-        # Check if a new page appeared; if so, briefly visit it then close it.
-        # (The actual completion tracking is done server-side on click.)
+        print(f"  [{section_label}] Clicking '{task.title}'...")
+        try:
+            task.selector.click(timeout=5000)
+        except PlaywrightTimeoutError:
+            print(f"  [{section_label}] Could not click '{task.title}', skipping")
+            continue
+        sleep(random.uniform(2.0, 4.0))
+
         try:
             page.wait_for_timeout(2000)
-            # Check if a new page was opened
             context = page.context
             new_pages = [p for p in context.pages if p != page and not p.is_closed()]
             if new_pages:
                 new_page = new_pages[0]
-                print(f"  [half-unit] New page opened: {new_page.url}")
-                # Give the page a moment to render
+                print(f"  [{section_label}] New page: {new_page.url}")
                 try:
                     new_page.wait_for_load_state("domcontentloaded", timeout=3000)
                 except PlaywrightTimeoutError:
                     pass
                 sleep(random.uniform(2.0, 4.0))
-                # Close the new page and return to original
                 new_page.close()
                 page.bring_to_front()
                 sleep(random.uniform(1.0, 2.0))
             else:
-                # No new page — try closing any overlay on the current page
                 try:
-                    page.locator(
-                        "button:has-text('Close'), a:has-text('Close')"
-                    ).first.click(timeout=2000)
+                    page.locator("button:has-text('Close'), a:has-text('Close')").first.click(
+                        timeout=2000
+                    )
                 except PlaywrightTimeoutError:
                     pass
                 sleep(random.uniform(1.0, 2.0))

@@ -1,4 +1,5 @@
 import pytest
+from typing import Any
 
 from bing_rewardd.rewards import (
     REWARDS_ICON_SELECTORS,
@@ -14,6 +15,7 @@ class FakePage:
         self.url = url
         self.urls: list[str] = []
         self.frames: list["FakeFrame"] = []
+        self._locators: dict[str, list[FakeLocator]] = {}
 
     def goto(self, url: str, wait_until: str, timeout: int = 5000) -> None:
         self.url = url
@@ -24,6 +26,9 @@ class FakePage:
 
     def wait_for_timeout(self, timeout: int) -> None:
         pass
+
+    def locator(self, selector: str) -> "FakeLocatorList":
+        return FakeLocatorList(self._locators.get(selector, []))
 
 
 class FakeLocator:
@@ -46,6 +51,9 @@ class FakeLocator:
     def locator(self, selector: str) -> "FakeLocatorList":
         return FakeLocatorList(self.children.get(selector, []))
 
+    def evaluate(self, expression: str, *args: object, timeout: int = 5000) -> Any:
+        return []
+
     def is_visible(self, timeout: int) -> bool:
         return self.visible
 
@@ -54,6 +62,9 @@ class FakeLocator:
 
     def click(self, timeout: int) -> None:
         self.clicks += 1
+
+    def evaluate(self, expression: str, *args: object, timeout: int = 5000) -> Any:
+        return ""
 
 
 class FakeLocatorList:
@@ -80,6 +91,12 @@ class FakeLocatorList:
 
     def fill(self, value: str, timeout: int) -> None:
         self.first.fill(value, timeout)
+
+    def locator(self, selector: str) -> "FakeLocatorList":
+        return FakeLocatorList([])
+
+    def evaluate(self, expression: str, *args: object, timeout: int = 5000) -> Any:
+        return []
 
 
 class FakeLocatorPage:
@@ -151,36 +168,90 @@ def test_click_rewards_icon_raises_clear_error_when_missing() -> None:
         click_rewards_icon(page)
 
 
-def test_list_visible_tasks_reads_only_sidebar_scope() -> None:
-    page = FakeLocatorPage(
-        {
-            "a[href]": [FakeLocator("Outside homepage reward text +5 points")],
-        }
-    )
-    sidebar = FakeLocator(
-        children={
-            "a[href]": [FakeLocator("Daily poll +10 points")],
-            "button": [FakeLocator("Completed offer")],
-        }
-    )
+def test_list_visible_tasks_returns_empty_without_sidebar() -> None:
+    page = FakeLocatorPage({})
 
-    tasks = list_visible_tasks(page, sidebar=sidebar)
+    tasks = list_visible_tasks(page)
 
-    assert [task.title for task in tasks] == ["Daily poll +10 points", "Completed offer"]
+    assert tasks == []
 
 
-def test_list_visible_tasks_reads_rewards_flyout_iframe() -> None:
+def test_list_visible_tasks_uses_section_heading(monkeypatch) -> None:
+    found_calls: list[str] = []
+    fake_result = [
+        {"idx": 0, "title": "Daily poll", "desc": "Test task", "points": "+10", "completed": False},
+    ]
+
+    class FakeBody:
+        def evaluate(self, expr: str, heading: str, timeout: int = 5000) -> list:
+            found_calls.append(heading)
+            return fake_result
+
+    class FakeFrame:
+        def locator(self, sel: str):
+            if sel == "body":
+                return FakeBody()
+            return self
+
+        def nth(self, idx: int) -> "FakeFrame":
+            return self
+
     sidebar = FakeLocator(children={"iframe": [FakeLocator()]})
-    frame_scope = FakeLocator(
-        children={
-            "a[href]": [FakeLocator("Iframe reward task +10 points")],
-        }
+    page = FakeFramePage({}, FakeFrame())
+    page.frame_locator = lambda sel: FakeFrame()  # type: ignore
+
+    tasks = list_visible_tasks(page, section_heading="Daily set", sidebar=sidebar)
+
+    assert found_calls == ["Daily set"]
+    assert len(tasks) == 1
+    assert "Daily poll" in tasks[0].title
+
+
+def test_list_visible_tasks_falls_back_to_legacy_selectors(monkeypatch) -> None:
+    from bing_rewardd.rewards import (
+        LEGACY_TASK_SELECTORS,
+        DAILY_SET_SECTION_HEADING,
+        KEEP_EARNING_SECTION_HEADING,
     )
-    page = FakeFramePage({}, frame_scope)
+
+    calls: list[str] = []
+
+    class FakeBody:
+        def evaluate(self, expr: str, heading: str, timeout: int = 5000) -> list:
+            calls.append(heading)
+            return []
+
+    class FakeFrame:
+        def locator(self, sel: str):
+            if sel == "body":
+                return FakeBody()
+            return FakeLocator()
+
+        def nth(self, idx: int) -> FakeLocator:
+            return FakeLocator()
+
+    class FakeScope:
+        def __init__(self, locators: dict[str, list[FakeLocator]]) -> None:
+            self._locators = locators
+
+        def locator(self, sel: str) -> FakeLocatorList:
+            return FakeLocatorList(self._locators.get(sel, []))
+
+    sidebar = FakeLocator(children={"iframe": [FakeLocator()]})
+    legacy_tasks = [FakeLocator("Daily poll +10 points")]
+    page = FakeFramePage({}, FakeFrame())
+    page.frame_locator = lambda sel: FakeFrame()  # type: ignore
+
+    def fake_task_scope(p: FakeFramePage, sb: FakeLocator) -> FakeScope:
+        return FakeScope({"a[href]": legacy_tasks})
+
+    monkeypatch.setattr("bing_rewardd.rewards._task_locator_scope", fake_task_scope)
 
     tasks = list_visible_tasks(page, sidebar=sidebar)
 
-    assert [task.title for task in tasks] == ["Iframe reward task +10 points"]
+    assert calls == [DAILY_SET_SECTION_HEADING, KEEP_EARNING_SECTION_HEADING]
+    assert len(tasks) == 1
+    assert "Daily poll" in tasks[0].title
 
 
 def test_open_rewards_sidebar_raises_not_logged_in_for_signup_cta(monkeypatch) -> None:
@@ -273,7 +344,7 @@ def test_guide_tasks_attempts_auto_login_when_not_signed_in(monkeypatch, capsys)
     monkeypatch.setattr("bing_rewardd.rewards._try_auto_login", lambda p, e, pw: True)
     monkeypatch.setattr(
         "bing_rewardd.rewards.list_visible_tasks",
-        lambda p, sl, sidebar=None: [],
+        lambda *args, **kwargs: [],
     )
 
     guide_tasks(FakePage())
