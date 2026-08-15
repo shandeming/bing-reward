@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import random
 from dataclasses import dataclass
 from time import sleep
@@ -508,6 +509,44 @@ def _click_submit(locator: Page) -> None:
             return
 
 
+def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
+    """Read the current Rewards points total from the sidebar."""
+    task_scope = sidebar or find_rewards_sidebar(page)
+    if task_scope is None:
+        return None
+    frame = _get_rewards_frame(page, task_scope)
+    if frame is not None:
+        try:
+            result = frame.locator("body").evaluate(
+                r"""() => {
+                  const body = document.body.innerText;
+                  const matches = [...body.matchAll(/\d[\d,]*\s*(?:points?|pts?)\b/gi)];
+                  for (const m of matches) {
+                    const num = parseInt(m[0].replace(/[^0-9]/g, ''), 10);
+                    if (num >= 100) return m[0].trim().replace(/\s+/g, ' ');
+                  }
+                  const ptsEl = document.querySelector(
+                    '[class*="points"], [class*="Points"], [aria-label*="points"], [aria-label*="Points"]'
+                  );
+                  if (ptsEl) return ptsEl.innerText.trim();
+                  return null;
+                }"""
+            )
+            if result:
+                return result
+        except Exception:
+            pass
+    try:
+        text = task_scope.locator("body").inner_text(timeout=3000)
+        for match in re.finditer(r"(\d[\d,]*)\s*(?:points?|pts?)", text, re.IGNORECASE):
+            num = int(match.group(1).replace(",", ""))
+            if num >= 100:
+                return re.sub(r"\s+", " ", match.group(0).strip())
+    except Exception:
+        pass
+    return None
+
+
 def guide_tasks(page: Page) -> None:
     try:
         sidebar = open_rewards_sidebar(page)
@@ -531,6 +570,10 @@ def guide_tasks(page: Page) -> None:
         return
 
     found_any = False
+
+    # Display starting points
+    start_points = get_points(page, sidebar)
+    print(f"Starting points: {start_points if start_points else 'N/A'}")
 
     # 1. Bing Search Streak: do a search (works for both old and new sidebar)
     print("Completing Bing Search streak...")
@@ -582,6 +625,18 @@ def guide_tasks(page: Page) -> None:
 
     if not found_any:
         print("No Rewards tasks found in the sidebar.")
+
+    # Display ending points
+    end_points = get_points(page, sidebar)
+    print(f"Ending points: {end_points if end_points else 'N/A'}")
+    if start_points and end_points:
+        try:
+            start_num = int(start_points.replace(",", "").split()[0])
+            end_num = int(end_points.replace(",", "").split()[0])
+            diff = end_num - start_num
+            print(f"Points earned: {diff:+d}")
+        except (ValueError, IndexError):
+            pass
 
 
 def complete_section_tasks(page: Page, tasks: list[RewardTask], section_label: str) -> None:
