@@ -2,7 +2,7 @@
 
 A Python + Playwright CLI tool for opening Chrome, navigating to Bing and Microsoft Rewards, and completing visible Rewards tasks.
 
-This tool intentionally does not farm rewards, generate fake searches, or bypass captchas. Search terms are extracted from task descriptions. Both local runs and GitHub Actions use a Playwright storage-state file to restore login cookies and localStorage.
+This tool intentionally does not farm rewards, generate fake searches, or bypass captchas. It opens the Rewards sidebar and completes visible tasks. The Search Streak task is handled by performing a single "weather" search. Both local runs and GitHub Actions use a Playwright storage-state file to restore login cookies and localStorage.
 
 ## Setup
 
@@ -19,13 +19,14 @@ python -m playwright install chromium
 bing-rewardd tasks      # Detect and complete all visible Rewards tasks
 ```
 
-Flags: `--storage-state FILE` (default `storage_state.json`), `--save-storage-state FILE`, `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`
+Flags: `--storage-state FILE` (default `storage_state.json`), `--save-storage-state FILE`, `--slow-mo N`, `--no-wait` (deprecated, no-op), `--screenshot-dir DIR`, `--headless`, `--extra-args ...`
 
 ## Notes
 
-- The browser runs visibly, not headless. This is required by the GitHub Actions workflow because Bing may return a reduced page in headless mode.
+- The browser runs visibly, not headless. Use `--headless` to override (may reduce task reliability on Bing).
 - No user input required — all actions are automatic.
-- The app does not store a username or password. Local and CI login state is stored in a Playwright storage-state file; CI receives it through `BING_STORAGE_STATE_B64`.
+- Login state is stored in a Playwright storage-state file; CI receives it through `BING_STORAGE_STATE_B64`.
+- Optional auto-login fallback: if the sidebar shows a sign-in prompt, the tool can read `.credentials.json` (git-ignored) to drive the Microsoft login flow. Credentials are never stored in the storage-state file or committed.
 
 ## GitHub Actions login state
 
