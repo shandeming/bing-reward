@@ -30,11 +30,19 @@ class NotLoggedInError(RuntimeError):
 
 
 _SIGNUP_MARKERS = (
-    "get started",
     "sign in to earn",
     "sign in to redeem",
     "earn points just for using bing",
     "redeem them for gift cards",
+    "get started with microsoft rewards",
+)
+
+_SIGNED_IN_MARKERS = (
+    "daily set",
+    "keep earning",
+    "streak",
+    "points left",
+    "my rewards",
 )
 
 DAILY_SET_SECTION_HEADING = "Daily set"
@@ -157,12 +165,34 @@ def _is_signed_in_to_rewards(page: Page) -> bool:
     sidebar = find_rewards_sidebar(page)
     if sidebar is None:
         return False
-    task_scope = _task_locator_scope(page, sidebar)
+
+    # Wait for iframe to finish loading content
     try:
-        text = task_scope.locator("body").inner_text(timeout=3000).lower()
-    except Exception:
-        return True  # can't read content; assume signed in
-    return not any(marker in text for marker in _SIGNUP_MARKERS)
+        frame_locator = page.frame_locator(REWARDS_FLYOUT_FRAME_SELECTOR)
+        frame = frame_locator.frame(timeout=5000)
+        if frame is not None:
+            frame.wait_for_load_state("domcontentloaded", timeout=10000)
+    except (PlaywrightTimeoutError, AttributeError):
+        pass
+
+    task_scope = _task_locator_scope(page, sidebar)
+    # Poll up to 3 times with brief waits — iframe content may load asynchronously
+    for _ in range(3):
+        try:
+            text = task_scope.locator("body").inner_text(timeout=5000).lower()
+        except Exception:
+            return True  # can't read content; assume signed in
+        if text:
+            # Positive signal: if the sidebar shows task-related headings, user is signed in
+            if any(marker in text for marker in _SIGNED_IN_MARKERS):
+                return True
+            # Negative signal: if sign-up CTA text is present, user is NOT signed in
+            if any(marker in text for marker in _SIGNUP_MARKERS):
+                return False
+            return True
+        sleep(1.5)
+    # After all retries, assume signed in (better than false-negative)
+    return True
 
 
 def list_visible_tasks(
@@ -560,7 +590,9 @@ def guide_tasks(page: Page) -> None:
             )
             return
         if _try_auto_login(page, creds["email"], creds["password"]):
-            print("[✓] Logged in. Retrying tasks...")
+            print("[✓] Logged in. Waiting for page to settle...")
+            sleep(5)
+            print("[✓] Retrying tasks...")
             guide_tasks(page)
             return
         print("[!] Auto-login failed. Please sign in manually, then re-run.")
