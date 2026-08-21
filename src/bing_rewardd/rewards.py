@@ -236,7 +236,7 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
             for (const section of sections) {
                 if (!section.innerText.includes(heading)) continue;
                 const cards = section.querySelectorAll('a[href]');
-                return Array.from(cards).map((a, idx) => {
+                const items = Array.from(cards).map((a) => {
                     const imgs = a.querySelectorAll('img');
                     const titleEl = imgs[0] || a.querySelector('p:first-child');
                     const title = (titleEl ? (titleEl.alt || titleEl.innerText) : a.innerText).trim();
@@ -249,8 +249,9 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
                         if (/^[+]?\\d+/.test(t)) { points = t; break; }
                     }
                     const completed = a.innerText.includes('Completed');
-                    return { idx, title, desc, points, completed };
+                    return { title, desc, points, completed };
                 }).filter(c => c.title.length > 2 && c.title !== 'Show more');
+                return items.map((c, idx) => ({ idx, ...c }));
             }
             return [];
         }""",

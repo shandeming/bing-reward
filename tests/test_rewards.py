@@ -471,6 +471,40 @@ def test_try_auto_login_returns_false_when_password_missing(monkeypatch) -> None
     assert result is False
 
 
+def test_find_cards_by_section_assigns_idx_after_filter(monkeypatch) -> None:
+    from bing_rewardd.rewards import _find_cards_by_section
+
+    # Simulate evaluate returning 3 items after filtering out one card,
+    # with idx values 0, 1, 2 (sequential post-filter, not pre-filter).
+    eval_result = [
+        {"idx": 0, "title": "Keep", "desc": "desc A", "points": "+10", "completed": False},
+        {"idx": 1, "title": "Keep", "desc": "desc B", "points": "+15", "completed": False},
+        {"idx": 2, "title": "Keep", "desc": "desc C", "points": "+20", "completed": False},
+    ]
+    nth_calls: list[int] = []
+
+    class FakeSection:
+        def locator(self, sel: str):
+            return self
+
+        def nth(self, idx: int):
+            nth_calls.append(idx)
+            return FakeLocator()
+
+    class FakeFrame:
+        def locator(self, sel: str):
+            if sel == "body":
+                return self
+            return FakeSection()
+
+        def evaluate(self, expr: str, heading: str, timeout: int = 5000) -> list:
+            return eval_result
+
+    tasks = _find_cards_by_section(FakeFrame(), "Daily set")
+    assert nth_calls == [0, 1, 2]
+    assert len(tasks) == 3
+
+
 def test_try_auto_login_returns_false_when_still_on_login_page(monkeypatch) -> None:
     from bing_rewardd.rewards import _try_auto_login
 

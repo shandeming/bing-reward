@@ -94,4 +94,8 @@ def active_page(context: BrowserContext) -> Page:
 def open_url(context: BrowserContext, url: str) -> Page:
     page = active_page(context)
     page.goto(url, wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Error:
+        pass
     return page
