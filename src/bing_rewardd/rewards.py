@@ -49,7 +49,18 @@ DAILY_SET_SECTION_HEADING = "Daily set"
 KEEP_EARNING_SECTION_HEADING = "Keep earning"
 
 # --- Legacy CSS selectors (pre-2026 React sidebar) ---
-DAILY_SET_TASK_SELECTOR = ["#daily_set_card .promo_cont"]
+DAILY_SET_TASK_SELECTOR = [
+    "#daily_set_card .promo_cont > a[href]",
+    "#daily_set_card .promo_cont:not(:has(a[href]))",
+]
+KEEP_EARNING_TASK_SELECTOR = [
+    ".flyout_control_halfUnit:has(> .promo_cont[role='banner']) > "
+    ".promo_cont[role='banner'] > a[href]",
+    ".flyout_control_halfUnit:has(> .promo_cont[role='banner']) > "
+    ".promo_cont[role='banner']:not(:has(a[href]))",
+    "#exb-activityChecklist .promo_cont > a[href]",
+    "#exb-activityChecklist .promo_cont:not(:has(a[href]))",
+]
 EXPLORE_TASK_SELECTOR = [
     "#exb-activityChecklist .promo_cont[data-is-inprogress-enabled='yes']"
 ]
@@ -215,7 +226,14 @@ def list_visible_tasks(
             tasks = _find_cards_by_section(frame, section_heading)
             if tasks:
                 return tasks
-        return _find_tasks_by_selectors(page, task_scope, LEGACY_TASK_SELECTORS, limit)
+        normalized_heading = section_heading.casefold()
+        if normalized_heading == DAILY_SET_SECTION_HEADING.casefold():
+            fallback_selectors = tuple(DAILY_SET_TASK_SELECTOR)
+        elif normalized_heading == KEEP_EARNING_SECTION_HEADING.casefold():
+            fallback_selectors = tuple(KEEP_EARNING_TASK_SELECTOR)
+        else:
+            fallback_selectors = LEGACY_TASK_SELECTORS
+        return _find_tasks_by_selectors(page, task_scope, fallback_selectors, limit)
 
     # Default: try new React section-based approach first, fall back to legacy selectors
     frame = _get_rewards_frame(page, task_scope)
@@ -232,42 +250,145 @@ def list_visible_tasks(
 def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]:
     result = frame.locator("body").evaluate(
         """(el, heading) => {
-            const sections = el.querySelectorAll('section');
-            for (const section of sections) {
-                if (!section.innerText.includes(heading)) continue;
-                const cards = section.querySelectorAll('a[href]');
-                const items = Array.from(cards).map((a) => {
-                    const imgs = a.querySelectorAll('img');
-                    const titleEl = imgs[0] || a.querySelector('p:first-child');
-                    const title = (titleEl ? (titleEl.alt || titleEl.innerText) : a.innerText).trim();
-                    const descEl = a.querySelectorAll('p')[1];
-                    const desc = descEl ? descEl.innerText.trim() : '';
-                    const ptsEls = a.querySelectorAll('.text-globalBody2Strong, .text-metadata');
-                    let points = '';
-                    for (const p of ptsEls) {
-                        const t = p.innerText.trim();
-                        if (/^[+]?\\d+/.test(t)) { points = t; break; }
-                    }
-                    const completed = a.innerText.includes('Completed');
-                    return { title, desc, points, completed };
-                }).filter(c => c.title.length > 2 && c.title !== 'Show more');
-                return items.map((c, idx) => ({ idx, ...c }));
+            const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+            const normalizedHeading = normalize(heading).toLocaleLowerCase();
+            const allCards = Array.from(el.querySelectorAll('a[href]'));
+            const containers = [];
+            const addContainer = (candidate) => {
+                if (candidate && candidate.querySelector('a[href]') && !containers.includes(candidate)) {
+                    containers.push(candidate);
+                }
+            };
+
+            // The legacy/current Bing flyout does not use <section>. Its two task
+            // groups instead use a stable id and a stable layout class.
+            if (normalizedHeading === 'daily set') {
+                addContainer(el.querySelector('#daily_set_card'));
+            } else if (normalizedHeading === 'keep earning') {
+                const halfUnitContainers = el.querySelectorAll(
+                    '.flyout_control_halfUnit:has(> .promo_cont[role="banner"]), ' +
+                    '.flyout_control_halfUnit:has(> .promo_cont[data-is-inprogress-enabled])'
+                );
+                for (const halfUnitContainer of halfUnitContainers) {
+                    addContainer(halfUnitContainer);
+                }
+                addContainer(el.querySelector('#exb-activityChecklist'));
             }
-            return [];
+
+            // Newer React variants use sections. Find an exact heading first so
+            // a broad parent containing several Rewards groups is not selected.
+            const headingCandidates = el.querySelectorAll(
+                'h1,h2,h3,h4,h5,h6,[role="heading"],p,[id]'
+            );
+            for (const headingEl of headingCandidates) {
+                if (normalize(headingEl.innerText).toLocaleLowerCase() !== normalizedHeading) {
+                    continue;
+                }
+                const section = headingEl.closest('section');
+                if (section) {
+                    addContainer(section);
+                    continue;
+                }
+                const knownTaskContainer = headingEl.closest(
+                    '#daily_set_card, #exb-activityChecklist, .flyout_control_halfUnit'
+                );
+                if (knownTaskContainer) {
+                    // A completed group may intentionally contain no task links.
+                    // Stop here instead of walking into the entire Rewards flyout.
+                    addContainer(knownTaskContainer);
+                    continue;
+                }
+                if (normalizedHeading === 'daily set' || normalizedHeading === 'keep earning') {
+                    continue;
+                }
+                for (
+                    let ancestor = headingEl.parentElement;
+                    ancestor && ancestor !== el;
+                    ancestor = ancestor.parentElement
+                ) {
+                    if (ancestor.querySelector('a[href]')) {
+                        addContainer(ancestor);
+                        break;
+                    }
+                }
+            }
+
+            // Retain support for section variants whose heading is not a semantic
+            // heading element.
+            for (const section of el.querySelectorAll('section')) {
+                if (normalize(section.innerText).toLocaleLowerCase().includes(normalizedHeading)) {
+                    addContainer(section);
+                }
+            }
+
+            const cards = [];
+            const seenCards = new Set();
+            for (const container of containers) {
+                for (const card of container.querySelectorAll('a[href]')) {
+                    if (seenCards.has(card)) continue;
+                    seenCards.add(card);
+                    cards.push(card);
+                }
+            }
+            cards.sort((left, right) => allCards.indexOf(left) - allCards.indexOf(right));
+
+            return cards.map((a) => {
+                const titleEl = a.querySelector('.promo-title, [data-testid*="title" i]');
+                const titleImage = Array.from(a.querySelectorAll('img[alt]'))
+                    .find((img) => normalize(img.alt));
+                const firstParagraph = a.querySelector('p');
+                const title = normalize(
+                    titleEl?.innerText || titleImage?.alt || a.getAttribute('aria-label') ||
+                    firstParagraph?.innerText || a.innerText
+                );
+
+                const descEl = a.querySelector('.promo-desc') ||
+                    Array.from(a.querySelectorAll('p')).find((p) => p !== titleEl && p !== firstParagraph);
+                const desc = normalize(descEl?.innerText);
+
+                const pointsEl = a.querySelector(
+                    '[aria-label*="point" i], .shortPoint.point, ' +
+                    '.text-globalBody2Strong, .text-metadata'
+                );
+                const points = normalize(
+                    pointsEl?.getAttribute('aria-label') || pointsEl?.innerText
+                );
+                const text = normalize(a.innerText);
+                const completed = /\\bcompleted\\b/i.test(text) || Boolean(a.querySelector(
+                    '.complete, .completed, .checkMark, ' +
+                    '[aria-label*="points added" i], [data-status="complete" i], ' +
+                    '[data-status="completed" i]'
+                ));
+
+                return {
+                    idx: allCards.indexOf(a),
+                    title,
+                    desc,
+                    points,
+                    completed,
+                };
+            }).filter((card) =>
+                card.idx >= 0 && card.title.length > 2 &&
+                card.title.toLocaleLowerCase() !== 'show more'
+            );
         }""",
         section_heading,
         timeout=5000,
     )
 
-    # Build the section + card locator once, share across tasks
-    section_locator = frame.locator(f"section:has-text('{section_heading}')")
-    card_locator = section_locator.locator("a[href]")
+    # Evaluation returns each card's index among all body links. That index remains
+    # correct when non-task links are filtered out and works for both DOM variants.
+    card_locator = frame.locator("a[href]")
 
     tasks: list[RewardTask] = []
+    seen_card_indices: set[int] = set()
     for card in result:
+        card_idx = card["idx"]
+        if card_idx in seen_card_indices:
+            continue
+        seen_card_indices.add(card_idx)
         title = f"{card['title']} | {card['desc']}" if card.get("desc") else card["title"]
         status = "complete" if card.get("completed") else ("available" if card.get("points") else "visible")
-        card_idx = card["idx"]
         tasks.append(
             RewardTask(
                 index=len(tasks) + 1,
@@ -617,7 +738,6 @@ def guide_tasks(page: Page) -> None:
     except PlaywrightTimeoutError:
         pass
     sleep(random.uniform(2.0, 4.0))
-    found_any = True
 
     # 2. Try new React section-based approach first
     for heading, label in [

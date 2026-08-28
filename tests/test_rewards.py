@@ -207,6 +207,28 @@ def test_list_visible_tasks_uses_section_heading(monkeypatch) -> None:
     assert "Daily poll" in tasks[0].title
 
 
+def test_list_visible_tasks_uses_keep_earning_specific_fallback(monkeypatch) -> None:
+    from bing_rewardd.rewards import KEEP_EARNING_TASK_SELECTOR
+
+    captured_selectors: list[tuple[str, ...]] = []
+    sidebar = FakeLocator()
+    page = FakeLocatorPage({})
+
+    monkeypatch.setattr("bing_rewardd.rewards._get_rewards_frame", lambda page, sidebar: object())
+    monkeypatch.setattr("bing_rewardd.rewards._find_cards_by_section", lambda frame, heading: [])
+
+    def fake_find_tasks(page, task_scope, selector_list, limit):
+        captured_selectors.append(selector_list)
+        return []
+
+    monkeypatch.setattr("bing_rewardd.rewards._find_tasks_by_selectors", fake_find_tasks)
+
+    tasks = list_visible_tasks(page, section_heading="Keep earning", sidebar=sidebar)
+
+    assert tasks == []
+    assert captured_selectors == [tuple(KEEP_EARNING_TASK_SELECTOR)]
+
+
 def test_list_visible_tasks_falls_back_to_legacy_selectors(monkeypatch) -> None:
     from bing_rewardd.rewards import (
         LEGACY_TASK_SELECTORS,
@@ -471,17 +493,20 @@ def test_try_auto_login_returns_false_when_password_missing(monkeypatch) -> None
     assert result is False
 
 
-def test_find_cards_by_section_assigns_idx_after_filter(monkeypatch) -> None:
+def test_find_cards_by_section_aggregates_and_deduplicates_global_link_indices(
+    monkeypatch,
+) -> None:
     from bing_rewardd.rewards import _find_cards_by_section
 
-    # Simulate evaluate returning 3 items after filtering out one card,
-    # with idx values 0, 1, 2 (sequential post-filter, not pre-filter).
+    # Links 4 and 7 come from separate supported containers. Link 4 is repeated
+    # because one container is nested in another, and must only produce one task.
     eval_result = [
-        {"idx": 0, "title": "Keep", "desc": "desc A", "points": "+10", "completed": False},
-        {"idx": 1, "title": "Keep", "desc": "desc B", "points": "+15", "completed": False},
-        {"idx": 2, "title": "Keep", "desc": "desc C", "points": "+20", "completed": False},
+        {"idx": 4, "title": "Keep", "desc": "desc A", "points": "+10", "completed": False},
+        {"idx": 7, "title": "Keep", "desc": "desc B", "points": "+15", "completed": True},
+        {"idx": 4, "title": "Keep", "desc": "desc A", "points": "+10", "completed": False},
     ]
     nth_calls: list[int] = []
+    expressions: list[str] = []
 
     class FakeSection:
         def locator(self, sel: str):
@@ -498,11 +523,20 @@ def test_find_cards_by_section_assigns_idx_after_filter(monkeypatch) -> None:
             return FakeSection()
 
         def evaluate(self, expr: str, heading: str, timeout: int = 5000) -> list:
+            expressions.append(expr)
             return eval_result
 
-    tasks = _find_cards_by_section(FakeFrame(), "Daily set")
-    assert nth_calls == [0, 1, 2]
-    assert len(tasks) == 3
+    tasks = _find_cards_by_section(FakeFrame(), "Keep earning")
+    assert nth_calls == [4, 7]
+    assert len(tasks) == 2
+    assert tasks[1].status == "complete"
+    assert "#daily_set_card" in expressions[0]
+    assert ".flyout_control_halfUnit" in expressions[0]
+    assert "knownTaskContainer" in expressions[0]
+    assert "Stop here instead of walking into the entire Rewards flyout" in expressions[0]
+    assert "for (const container of containers)" in expressions[0]
+    assert "containers[0]" not in expressions[0]
+    assert ".checkMark" in expressions[0]
 
 
 def test_try_auto_login_returns_false_when_still_on_login_page(monkeypatch) -> None:
