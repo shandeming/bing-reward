@@ -124,6 +124,47 @@ def test_infer_status_available_from_points_text() -> None:
     assert _infer_status("Daily poll +10 points") == "available"
 
 
+def test_report_points_change_warns_in_console(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import _report_points_change
+
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    result = _report_points_change("7,500 points", "7,500 points")
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Points earned: +0" in captured.out
+    assert "::warning" not in captured.out
+    assert "ALERT: No new Microsoft Rewards points were earned" in captured.err
+
+
+def test_report_points_change_emits_github_warning(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import _report_points_change
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    result = _report_points_change("7,500 points", "7,500 points")
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "::warning title=No Rewards points earned::" in captured.out
+    assert "ALERT: No new Microsoft Rewards points were earned" in captured.err
+
+
+def test_report_points_change_does_not_warn_after_increase(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import _report_points_change
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    result = _report_points_change("7,500 points", "7,510 points")
+    captured = capsys.readouterr()
+
+    assert result == 10
+    assert "Points earned: +10" in captured.out
+    assert "::warning" not in captured.out
+    assert captured.err == ""
+
+
 def test_infer_status_complete_from_completed_text() -> None:
     assert _infer_status("Task completed") == "complete"
 

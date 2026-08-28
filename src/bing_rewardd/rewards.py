@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import re
+import os
 import random
+import re
+import sys
 from dataclasses import dataclass
 from time import sleep
 from typing import Any
@@ -699,6 +701,31 @@ def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
     return None
 
 
+def _report_points_change(start_points: str | None, end_points: str | None) -> int | None:
+    if not start_points or not end_points:
+        return None
+
+    try:
+        start_num = int(start_points.replace(",", "").split()[0])
+        end_num = int(end_points.replace(",", "").split()[0])
+    except (ValueError, IndexError):
+        return None
+
+    diff = end_num - start_num
+    print(f"Points earned: {diff:+d}")
+    if diff <= 0:
+        print(
+            "[!] ALERT: No new Microsoft Rewards points were earned.",
+            file=sys.stderr,
+        )
+        if os.environ.get("GITHUB_ACTIONS", "").casefold() == "true":
+            print(
+                "::warning title=No Rewards points earned::"
+                "The Microsoft Rewards balance did not increase during this run."
+            )
+    return diff
+
+
 def guide_tasks(page: Page) -> None:
     try:
         sidebar = open_rewards_sidebar(page)
@@ -782,14 +809,7 @@ def guide_tasks(page: Page) -> None:
     # Display ending points
     end_points = get_points(page, sidebar)
     print(f"Ending points: {end_points if end_points else 'N/A'}")
-    if start_points and end_points:
-        try:
-            start_num = int(start_points.replace(",", "").split()[0])
-            end_num = int(end_points.replace(",", "").split()[0])
-            diff = end_num - start_num
-            print(f"Points earned: {diff:+d}")
-        except (ValueError, IndexError):
-            pass
+    _report_points_change(start_points, end_points)
 
 
 def complete_section_tasks(page: Page, tasks: list[RewardTask], section_label: str) -> None:
