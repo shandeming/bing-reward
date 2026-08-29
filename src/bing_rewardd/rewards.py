@@ -104,6 +104,14 @@ SEARCH_INPUT_SELECTOR = ["textarea[name='q']", "#sb_form_q"]
 
 REWARDS_FLYOUT_FRAME_SELECTOR = "#rewid-f iframe"
 
+REWARDS_BALANCE_SELECTORS = (
+    ".balance_card_points_clickable",
+    "[aria-label='Rewards dashboard' i]",
+    "[class*='balance'][class*='point']",
+    "[aria-label*='rewards points' i]",
+    "[aria-label*='points balance' i]",
+)
+
 
 def wait_for_possible_login(page: Page) -> None:
     if "login" in page.url.lower() or "signin" in page.url.lower():
@@ -663,42 +671,59 @@ def _click_submit(locator: Page) -> None:
             return
 
 
+def _format_points_number(text: str) -> str | None:
+    match = re.search(r"(?<![\d,])(\d[\d,]*)(?![\d,])", text)
+    if not match:
+        return None
+    return f"{match.group(1)} points"
+
+
+def _extract_labeled_points_balance(text: str) -> str | None:
+    """Extract a balance only when it is explicitly labeled as such."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    patterns = (
+        r"(?P<points>\d[\d,]*)\s+(?:my\s+)?rewards\s+points\b",
+        r"\b(?:my\s+)?rewards\s+points\s+(?P<points>\d[\d,]*)",
+        r"(?P<points>\d[\d,]*)\s+(?:available|current|total)\s+points\b",
+        r"\b(?:available|current|total)\s+points\s+(?P<points>\d[\d,]*)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return f"{match.group('points')} points"
+    return None
+
+
 def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
-    """Read the current Rewards points total from the sidebar."""
+    """Read the current Rewards balance without mistaking offer values for it."""
     task_scope = sidebar or find_rewards_sidebar(page)
     if task_scope is None:
         return None
+
     frame = _get_rewards_frame(page, task_scope)
-    if frame is not None:
+    scope = frame or task_scope
+
+    # Prefer elements that identify the account balance. The flyout contains
+    # many other point values (referral offers, streak bonuses, task values).
+    for selector in REWARDS_BALANCE_SELECTORS:
         try:
-            result = frame.locator("body").evaluate(
-                r"""() => {
-                  const body = document.body.innerText;
-                  const matches = [...body.matchAll(/\d[\d,]*\s*(?:points?|pts?)\b/gi)];
-                  for (const m of matches) {
-                    const num = parseInt(m[0].replace(/[^0-9]/g, ''), 10);
-                    if (num >= 100) return m[0].trim().replace(/\s+/g, ' ');
-                  }
-                  const ptsEl = document.querySelector(
-                    '[class*="points"], [class*="Points"], [aria-label*="points"], [aria-label*="Points"]'
-                  );
-                  if (ptsEl) return ptsEl.innerText.trim();
-                  return null;
-                }"""
-            )
-            if result:
-                return result
+            candidate = scope.locator(selector).first
+            if not _is_visible(candidate):
+                continue
+            points = _format_points_number(candidate.inner_text(timeout=3000))
+            if points:
+                return points
         except Exception:
-            pass
+            continue
+
+    # Support older layouts, but require an explicit balance label. Returning
+    # N/A is safer than treating the first promotional "7,500 points" as the
+    # user's balance.
     try:
-        text = task_scope.locator("body").inner_text(timeout=3000)
-        for match in re.finditer(r"(\d[\d,]*)\s*(?:points?|pts?)", text, re.IGNORECASE):
-            num = int(match.group(1).replace(",", ""))
-            if num >= 100:
-                return re.sub(r"\s+", " ", match.group(0).strip())
+        text = scope.locator("body").inner_text(timeout=3000)
+        return _extract_labeled_points_balance(text)
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _report_points_change(start_points: str | None, end_points: str | None) -> int | None:

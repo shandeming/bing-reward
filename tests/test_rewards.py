@@ -124,6 +124,53 @@ def test_infer_status_available_from_points_text() -> None:
     assert _infer_status("Daily poll +10 points") == "available"
 
 
+def test_get_points_prefers_balance_element_over_promotional_points() -> None:
+    from bing_rewardd.rewards import get_points
+
+    sidebar = FakeLocator(
+        children={
+            ".balance_card_points_clickable": [
+                FakeLocator("4,901\nMy rewards points")
+            ],
+            "body": [
+                FakeLocator(
+                    "Earn up to an extra 7,500 points a month. "
+                    "4,901 My rewards points"
+                )
+            ],
+        }
+    )
+
+    assert get_points(FakePage(), sidebar) == "4,901 points"
+
+
+def test_get_points_fallback_requires_explicit_balance_label() -> None:
+    from bing_rewardd.rewards import get_points
+
+    sidebar = FakeLocator(
+        children={
+            "body": [
+                FakeLocator(
+                    "Earn up to an extra 7,500 points a month. "
+                    "42 My rewards points"
+                )
+            ]
+        }
+    )
+
+    assert get_points(FakePage(), sidebar) == "42 points"
+
+
+def test_get_points_does_not_treat_offer_as_balance() -> None:
+    from bing_rewardd.rewards import get_points
+
+    sidebar = FakeLocator(
+        children={"body": [FakeLocator("Earn up to 7,500 points a month.")]}
+    )
+
+    assert get_points(FakePage(), sidebar) is None
+
+
 def test_report_points_change_warns_in_console(monkeypatch, capsys) -> None:
     from bing_rewardd.rewards import _report_points_change
 
