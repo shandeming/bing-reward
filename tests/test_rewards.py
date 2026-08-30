@@ -627,6 +627,86 @@ def test_find_cards_by_section_aggregates_and_deduplicates_global_link_indices(
     assert ".checkMark" in expressions[0]
 
 
+def test_complete_section_tasks_refreshes_locators_after_each_click(monkeypatch) -> None:
+    from bing_rewardd.rewards import RewardTask, complete_section_tasks
+
+    class StaleAfterFirstClick(FakeLocator):
+        def __init__(self, state: dict[str, bool]) -> None:
+            super().__init__()
+            self.state = state
+
+        def click(self, timeout: int) -> None:
+            if self.state["stale"]:
+                pytest.fail("reused a locator from the old iframe document")
+            super().click(timeout)
+
+    state = {"stale": False}
+
+    class FirstTaskLocator(FakeLocator):
+        def click(self, timeout: int) -> None:
+            super().click(timeout)
+            state["stale"] = True
+
+    first_locator = FirstTaskLocator()
+    stale_second_locator = StaleAfterFirstClick(state)
+    fresh_second_locator = FakeLocator()
+    tasks = [
+        RewardTask(1, "First task | old description", "available", first_locator),
+        RewardTask(2, "Second task | old description", "available", stale_second_locator),
+    ]
+    refresh_calls: list[str] = []
+
+    def fake_refresh(page, expected, *, section_heading, selector_list):
+        refresh_calls.append(expected.title)
+        return RewardTask(
+            expected.index,
+            "Second task | refreshed description",
+            expected.status,
+            fresh_second_locator,
+        )
+
+    monkeypatch.setattr("bing_rewardd.rewards._refresh_task", fake_refresh)
+    monkeypatch.setattr("bing_rewardd.rewards.sleep", lambda seconds: None)
+    page = FakePage()
+    page.context = type("Context", (), {"pages": [page]})()  # type: ignore[attr-defined]
+    page.is_closed = lambda: False  # type: ignore[attr-defined]
+
+    complete_section_tasks(
+        page,
+        tasks,
+        "daily-set",
+        section_heading="Daily set",
+    )
+
+    assert first_locator.clicks == 1
+    assert stale_second_locator.clicks == 0
+    assert fresh_second_locator.clicks == 1
+    assert refresh_calls == ["Second task | old description"]
+
+
+def test_refresh_task_matches_headline_when_description_changes(monkeypatch) -> None:
+    from bing_rewardd.rewards import RewardTask, _refresh_task
+
+    sidebar = FakeLocator()
+    stale_task = RewardTask(1, "Daily poll | old description", "available", FakeLocator())
+    fresh_task = RewardTask(1, "Daily poll | new description", "available", FakeLocator())
+
+    monkeypatch.setattr("bing_rewardd.rewards.open_rewards_sidebar", lambda page: sidebar)
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.list_visible_tasks",
+        lambda *args, **kwargs: [fresh_task],
+    )
+
+    result = _refresh_task(
+        FakePage(),
+        stale_task,
+        section_heading="Daily set",
+        selector_list=None,
+    )
+
+    assert result is fresh_task
+
+
 def test_try_auto_login_returns_false_when_still_on_login_page(monkeypatch) -> None:
     from bing_rewardd.rewards import _try_auto_login
 

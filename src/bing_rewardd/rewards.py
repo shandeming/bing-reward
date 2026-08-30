@@ -806,7 +806,12 @@ def guide_tasks(page: Page) -> None:
             print(f"Detected {len(tasks)} {label} tasks:")
             for task in tasks:
                 print(f"  {task.index}. {task.title} [{task.status}]")
-            complete_section_tasks(page, tasks, label.lower().replace(" ", "-"))
+            complete_section_tasks(
+                page,
+                tasks,
+                label.lower().replace(" ", "-"),
+                section_heading=heading,
+            )
 
     # 3. If nothing found via new approach, try legacy CSS selectors
     if not found_any:
@@ -826,7 +831,12 @@ def guide_tasks(page: Page) -> None:
             print(f"Detected {len(tasks)} {task_label.title()} tasks:")
             for task in tasks:
                 print(f"  {task.index}. {task.title} [{task.status}]")
-            complete_section_tasks(page, tasks, task_label)
+            complete_section_tasks(
+                page,
+                tasks,
+                task_label,
+                selector_list=tuple(selector_list),
+            )
 
     if not found_any:
         print("No Rewards tasks found in the sidebar.")
@@ -837,17 +847,95 @@ def guide_tasks(page: Page) -> None:
     _report_points_change(start_points, end_points)
 
 
-def complete_section_tasks(page: Page, tasks: list[RewardTask], section_label: str) -> None:
+def _task_title_key(title: str) -> str:
+    """Return the stable headline portion used to reacquire a Rewards card."""
+    headline = title.split(" | ", 1)[0]
+    return re.sub(r"\s+", " ", headline).strip().casefold()
+
+
+def _refresh_task(
+    page: Page,
+    expected: RewardTask,
+    *,
+    section_heading: str | None,
+    selector_list: tuple[str, ...] | None,
+) -> RewardTask | None:
+    """Reload the flyout and find a fresh locator for an expected task.
+
+    Some Rewards cards navigate the flyout iframe instead of opening a popup.
+    Every locator collected from the old iframe document is stale afterward, so
+    return to Bing and rediscover the card rather than reusing those locators.
+    """
+    try:
+        sidebar = open_rewards_sidebar(page)
+    except (NotLoggedInError, RewardsSidebarError):
+        return None
+
+    current_tasks = list_visible_tasks(
+        page,
+        section_heading=section_heading,
+        sidebar=sidebar,
+        selector_list=selector_list,
+    )
+    expected_key = _task_title_key(expected.title)
+    return next(
+        (task for task in current_tasks if _task_title_key(task.title) == expected_key),
+        None,
+    )
+
+
+def complete_section_tasks(
+    page: Page,
+    tasks: list[RewardTask],
+    section_label: str,
+    *,
+    section_heading: str | None = None,
+    selector_list: tuple[str, ...] | None = None,
+) -> None:
+    refresh_before_click = False
     for task in tasks:
         if task.status == "complete":
             print(f"  [{section_label}] Skipping completed '{task.title}'")
             continue
+
+        active_task = task
+        if refresh_before_click:
+            refreshed_task = _refresh_task(
+                page,
+                task,
+                section_heading=section_heading,
+                selector_list=selector_list,
+            )
+            if refreshed_task is None:
+                print(
+                    f"  [{section_label}] Could not find "
+                    f"'{task.title}' after refreshing, skipping"
+                )
+                continue
+            active_task = refreshed_task
+
         print(f"  [{section_label}] Clicking '{task.title}'...")
         try:
-            task.selector.click(timeout=5000)
+            active_task.selector.click(timeout=5000)
         except PlaywrightTimeoutError:
-            print(f"  [{section_label}] Could not click '{task.title}', skipping")
-            continue
+            # The flyout can rerender between discovery and the first click too.
+            # Refresh once and retry with a locator from the current iframe.
+            refreshed_task = _refresh_task(
+                page,
+                task,
+                section_heading=section_heading,
+                selector_list=selector_list,
+            )
+            if refreshed_task is None:
+                print(f"  [{section_label}] Could not click '{task.title}', skipping")
+                continue
+            try:
+                refreshed_task.selector.click(timeout=5000)
+            except PlaywrightTimeoutError:
+                print(f"  [{section_label}] Could not click '{task.title}', skipping")
+                continue
+
+        refresh_before_click = True
         sleep(random.uniform(2.0, 4.0))
 
         try:
