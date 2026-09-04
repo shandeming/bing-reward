@@ -112,6 +112,93 @@ REWARDS_BALANCE_SELECTORS = (
     "[aria-label*='points balance' i]",
 )
 
+DASHBOARD_CLAIM_CONTROL_SELECTORS = (
+    "button:has-text('Claim points')",
+    "[role='button']:has-text('Claim points')",
+    "a:has-text('Claim points')",
+)
+
+# The bonus card is rendered inside the Rewards flyout and has changed its
+# classes between Bing layouts.  Discovery therefore starts with all
+# clickable controls and validates the nearby card text instead of depending
+# on one generated class name.
+BONUS_CLAIM_CONTROL_SELECTOR = (
+    'button, a, [role="button"], input[type="button"], input[type="submit"]'
+)
+BONUS_CARD_MAX_TEXT_LENGTH = 500
+
+_FIND_BONUS_CLAIM_SCRIPT = rf"""
+    (el) => {{
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const controls = Array.from(el.querySelectorAll(
+            '{BONUS_CLAIM_CONTROL_SELECTOR}'
+        ));
+        const visible = (node) => {{
+            const rect = node.getBoundingClientRect();
+            const style = window.getComputedStyle(node);
+            return rect.width > 0 && rect.height > 0 &&
+                style.visibility !== 'hidden' && style.display !== 'none';
+        }};
+        const labelFor = (node) => normalize([
+            node.innerText,
+            node.value,
+            node.getAttribute('aria-label'),
+            node.getAttribute('title')
+        ].filter(Boolean).join(' '));
+        const isBonusCard = (text) =>
+            text.length <= {BONUS_CARD_MAX_TEXT_LENGTH} &&
+            (/\bbonus\s+points?\b/i.test(text) ||
+                /\bpoints?\s+bonus\b/i.test(text));
+
+        for (let index = 0; index < controls.length; index += 1) {{
+            const control = controls[index];
+            if (!visible(control) || !/\bclaim\b/i.test(labelFor(control))) {{
+                continue;
+            }}
+            for (
+                let ancestor = control;
+                ancestor && ancestor !== el;
+                ancestor = ancestor.parentElement
+            ) {{
+                const cardText = normalize(ancestor.innerText || ancestor.textContent);
+                if (cardText.length > {BONUS_CARD_MAX_TEXT_LENGTH}) {{
+                    break;
+                }}
+                if (isBonusCard(cardText)) {{
+                    return {{ index, cardText }};
+                }}
+            }}
+        }}
+        return null;
+    }}
+"""
+
+_IS_BONUS_CLAIM_CONTROL_SCRIPT = rf"""
+    (el) => {{
+        const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const label = normalize([
+            el.innerText,
+            el.value,
+            el.getAttribute('aria-label'),
+            el.getAttribute('title')
+        ].filter(Boolean).join(' '));
+        if (!/\bclaim\b/i.test(label)) return false;
+        for (
+            let ancestor = el;
+            ancestor;
+            ancestor = ancestor.parentElement
+        ) {{
+            const cardText = normalize(ancestor.innerText || ancestor.textContent);
+            if (cardText.length > {BONUS_CARD_MAX_TEXT_LENGTH}) break;
+            if (/\bbonus\s+points?\b/i.test(cardText) ||
+                /\bpoints?\s+bonus\b/i.test(cardText)) {{
+                return cardText;
+            }}
+        }}
+        return false;
+    }}
+"""
+
 
 def wait_for_possible_login(page: Page) -> None:
     if "login" in page.url.lower() or "signin" in page.url.lower():
@@ -726,14 +813,330 @@ def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
         return None
 
 
-def _report_points_change(start_points: str | None, end_points: str | None) -> int | None:
-    if not start_points or not end_points:
+def _find_bonus_claim_target(
+    page: Page,
+    sidebar: Locator,
+) -> tuple[Locator, str] | None:
+    """Find the Claim control belonging to the visible bonus-points card."""
+    scope = _task_locator_scope(page, sidebar)
+    controls = scope.locator(BONUS_CLAIM_CONTROL_SELECTOR)
+
+    # A DOM evaluation keeps the selector independent of generated React
+    # classes while returning an index that can be converted into a live
+    # Playwright locator in the same frame.
+    discovery: Any = None
+    try:
+        body = scope.locator("body")
+        try:
+            body_count = body.count()
+        except Exception:
+            body_count = 0
+        evaluation_target = body.first if body_count else scope
+        if hasattr(evaluation_target, "evaluate"):
+            discovery = evaluation_target.evaluate(
+                _FIND_BONUS_CLAIM_SCRIPT,
+                timeout=5000,
+            )
+    except Exception:
+        discovery = None
+
+    if isinstance(discovery, dict):
+        raw_index = discovery.get("index")
+        if isinstance(raw_index, int):
+            try:
+                if 0 <= raw_index < controls.count():
+                    candidate = controls.nth(raw_index)
+                    if _is_visible(candidate):
+                        return candidate, str(discovery.get("cardText") or "")
+            except Exception:
+                pass
+
+    # Fallback for older or unusual flyouts where evaluating the body is not
+    # available.  Each candidate is still checked against its nearby card so
+    # a generic Redeem/Claim control cannot be selected accidentally.
+    try:
+        count = min(controls.count(), 50)
+    except Exception:
+        count = 0
+    for index in range(count):
+        candidate = controls.nth(index)
+        if not _is_visible(candidate):
+            continue
+        try:
+            card_text = candidate.evaluate(
+                _IS_BONUS_CLAIM_CONTROL_SCRIPT,
+                timeout=3000,
+            )
+        except Exception:
+            continue
+        if isinstance(card_text, str) and card_text:
+            return candidate, card_text
+
+    return None
+
+
+def _extract_bonus_points(text: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    patterns = (
+        r"\b(?:claim|earn)\s+(?:your\s+)?(?P<points>\d[\d,]*)\s+bonus\s+points?\b",
+        r"\b(?P<points>\d[\d,]*)\s+bonus\s+points?\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return f"{match.group('points')} points"
+    return None
+
+
+def _points_number(points: str | None) -> int | None:
+    if not points:
+        return None
+    try:
+        return int(points.replace(",", "").split()[0])
+    except (ValueError, IndexError):
         return None
 
+
+def _context_pages(page: Page) -> list[Page]:
     try:
-        start_num = int(start_points.replace(",", "").split()[0])
-        end_num = int(end_points.replace(",", "").split()[0])
-    except (ValueError, IndexError):
+        return list(page.context.pages)
+    except Exception:
+        return []
+
+
+def _new_context_pages(page: Page, existing_pages: list[Page]) -> list[Page]:
+    existing_ids = {id(existing) for existing in existing_pages}
+    new_pages: list[Page] = []
+    for candidate in _context_pages(page):
+        if id(candidate) in existing_ids or candidate == page:
+            continue
+        try:
+            if candidate.is_closed():
+                continue
+        except Exception:
+            pass
+        new_pages.append(candidate)
+    return new_pages
+
+
+def _wait_for_new_page(
+    page: Page,
+    existing_pages: list[Page],
+    attempts: int = 12,
+) -> Page | None:
+    for attempt in range(attempts):
+        new_pages = _new_context_pages(page, existing_pages)
+        if new_pages:
+            return new_pages[0]
+        if attempt < attempts - 1:
+            try:
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+    return None
+
+
+def _find_dashboard_claim_control(page: Page) -> Locator | None:
+    """Find the final Claim points button on the Rewards dashboard modal."""
+    for selector in DASHBOARD_CLAIM_CONTROL_SELECTORS:
+        controls = page.locator(selector)
+        try:
+            count = min(controls.count(), 10)
+        except Exception:
+            continue
+        for index in range(count):
+            candidate = controls.nth(index)
+            if not _is_visible(candidate):
+                continue
+            label = " ".join(_clean_text(candidate).split()).casefold()
+            if "claim points" in label:
+                return candidate
+    return None
+
+
+def _close_new_pages(page: Page, existing_pages: list[Page]) -> None:
+    """Close pages opened by a Rewards control and restore the main page."""
+    for opened in _new_context_pages(page, existing_pages):
+        try:
+            opened.wait_for_load_state("domcontentloaded", timeout=3000)
+        except Exception:
+            pass
+        try:
+            opened.close()
+        except Exception:
+            pass
+    try:
+        page.bring_to_front()
+    except Exception:
+        pass
+
+
+def _claim_dashboard_bonus(
+    dashboard_page: Page,
+    original_page: Page,
+    sidebar: Locator,
+    starting_points: str | None,
+) -> bool:
+    """Complete the second-step Claim points action in the dashboard modal."""
+    claim_control: Locator | None = None
+    for attempt in range(12):
+        claim_control = _find_dashboard_claim_control(dashboard_page)
+        if claim_control is not None:
+            break
+        if attempt < 11:
+            try:
+                dashboard_page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+    if claim_control is None:
+        return False
+
+    print("  [bonus] Confirming claim in the Rewards dashboard...")
+    clicked = False
+    try:
+        claim_control.click(timeout=5000)
+        clicked = True
+    except PlaywrightTimeoutError:
+        pass
+
+    for attempt in range(8):
+        if attempt:
+            try:
+                dashboard_page.wait_for_timeout(500)
+            except Exception:
+                pass
+        if _find_dashboard_claim_control(dashboard_page) is None:
+            return True
+
+    # The dashboard may leave the button visible while the flyout is updated.
+    # Accept the original flyout's card/balance transition as confirmation.
+    return clicked and _wait_for_bonus_claim(original_page, sidebar, starting_points)
+
+
+def _wait_for_bonus_claim(
+    page: Page,
+    sidebar: Locator,
+    starting_points: str | None,
+) -> bool:
+    starting_number = _points_number(starting_points)
+    for attempt in range(6):
+        if attempt:
+            try:
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+        current_sidebar = find_rewards_sidebar(page) or sidebar
+        target = _find_bonus_claim_target(page, current_sidebar)
+        current_points = get_points(page, current_sidebar)
+        current_number = _points_number(current_points)
+
+        # The flyout normally removes or changes the card after claiming.  A
+        # balance increase is accepted as a second, independent confirmation.
+        if target is None:
+            return True
+        if (
+            starting_number is not None
+            and current_number is not None
+            and current_number > starting_number
+        ):
+            return True
+    return False
+
+
+def claim_bonus_points(page: Page, sidebar: Locator | None = None) -> bool:
+    """Claim the visible bonus-points card at the end of a Rewards run."""
+    task_scope = sidebar or find_rewards_sidebar(page)
+    if task_scope is None:
+        print("  [bonus] Rewards sidebar unavailable; skipping bonus claim.")
+        return False
+
+    target = _find_bonus_claim_target(page, task_scope)
+    if target is None:
+        print("  [bonus] No bonus points are currently available to claim.")
+        return False
+
+    control, card_text = target
+    amount = _extract_bonus_points(card_text)
+    amount_label = f" ({amount})" if amount else ""
+    starting_points = get_points(page, task_scope)
+    print(f"  [bonus] Claiming available bonus points{amount_label}...")
+
+    existing_pages = _context_pages(page)
+    clicked = False
+    for attempt in range(2):
+        try:
+            control.click(timeout=5000)
+            clicked = True
+            break
+        except PlaywrightTimeoutError:
+            if attempt:
+                break
+            refreshed_sidebar = find_rewards_sidebar(page)
+            if refreshed_sidebar is None:
+                break
+            refreshed_target = _find_bonus_claim_target(page, refreshed_sidebar)
+            if refreshed_target is None:
+                # The first click may have succeeded while the iframe was
+                # rerendering; let the verification pass decide.
+                break
+            control, card_text = refreshed_target
+            amount = _extract_bonus_points(card_text)
+            amount_label = f" ({amount})" if amount else ""
+
+    try:
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
+
+    # The flyout's first Claim control opens the Rewards dashboard in a new
+    # tab. That page contains a second, final "Claim points" button; closing
+    # the tab here would leave the bonus in its pending state.
+    dashboard_page = _wait_for_new_page(page, existing_pages)
+    if dashboard_page is not None:
+        dashboard_claimed = _claim_dashboard_bonus(
+            dashboard_page,
+            page,
+            task_scope,
+            starting_points,
+        )
+        _close_new_pages(page, existing_pages)
+        if dashboard_claimed:
+            print(f"  [bonus] Bonus points claimed{amount_label}.")
+            return True
+        print("  [bonus] Could not complete the Claim points dashboard action.")
+        return False
+
+    # Support layouts that reuse the current tab instead of opening a new
+    # dashboard page.
+    if _find_dashboard_claim_control(page) is not None:
+        dashboard_claimed = _claim_dashboard_bonus(
+            page,
+            page,
+            task_scope,
+            starting_points,
+        )
+        if dashboard_claimed:
+            print(f"  [bonus] Bonus points claimed{amount_label}.")
+            return True
+
+    _close_new_pages(page, existing_pages)
+    if _wait_for_bonus_claim(page, task_scope, starting_points):
+        print(f"  [bonus] Bonus points claimed{amount_label}.")
+        return True
+
+    if clicked:
+        print("  [bonus] Claim was clicked, but the result could not be verified.")
+    else:
+        print("  [bonus] Could not click the bonus Claim control.")
+    return False
+
+
+def _report_points_change(start_points: str | None, end_points: str | None) -> int | None:
+    start_num = _points_number(start_points)
+    end_num = _points_number(end_points)
+    if start_num is None or end_num is None:
         return None
 
     diff = end_num - start_num
@@ -840,6 +1243,16 @@ def guide_tasks(page: Page) -> None:
 
     if not found_any:
         print("No Rewards tasks found in the sidebar.")
+
+    # 4. The completed task groups can unlock a separate bonus card at the
+    # top of the flyout. Refresh the sidebar so the claim uses live locators.
+    print("Checking for bonus points to claim...")
+    try:
+        sidebar = open_rewards_sidebar(page)
+    except (NotLoggedInError, RewardsSidebarError) as exc:
+        print(f"  [bonus] Could not reopen Rewards sidebar: {exc}")
+    else:
+        claim_bonus_points(page, sidebar)
 
     # Display ending points
     end_points = get_points(page, sidebar)

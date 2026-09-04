@@ -739,3 +739,197 @@ def test_try_auto_login_returns_false_when_still_on_login_page(monkeypatch) -> N
     assert result is False
     result = _try_auto_login(page, "a@b.com", "secret")
     assert result is False
+
+
+def test_find_bonus_claim_target_uses_bonus_card_context() -> None:
+    from bing_rewardd.rewards import BONUS_CLAIM_CONTROL_SELECTOR, _find_bonus_claim_target
+
+    redeem = FakeLocator("Redeem")
+    claim = FakeLocator("Claim")
+
+    class FakeBody:
+        first = None
+
+        def __init__(self) -> None:
+            self.first = self
+
+        def count(self) -> int:
+            return 1
+
+        def evaluate(self, expression: str, timeout: int = 5000) -> dict:
+            assert "bonus\\s+points?" in expression
+            return {
+                "index": 1,
+                "cardText": "Claim your 6 bonus points before they expire Claim",
+            }
+
+    class FakeScope:
+        def locator(self, selector: str):
+            if selector == "iframe":
+                return FakeLocatorList([])
+            if selector == "body":
+                return FakeBody()
+            if selector == BONUS_CLAIM_CONTROL_SELECTOR:
+                return FakeLocatorList([redeem, claim])
+            raise AssertionError(f"Unexpected selector: {selector}")
+
+    result = _find_bonus_claim_target(FakePage(), FakeScope())  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result[0] is claim
+    assert "6 bonus points" in result[1]
+    assert redeem.clicks == 0
+
+
+def test_extract_bonus_points_from_claim_card() -> None:
+    from bing_rewardd.rewards import _extract_bonus_points
+
+    assert (
+        _extract_bonus_points(
+            "Claim your 1,250 bonus points before they start expiring on Oct 4, 2026"
+        )
+        == "1,250 points"
+    )
+    assert _extract_bonus_points("Ready for your next prize? Redeem") is None
+
+
+def test_claim_bonus_points_clicks_and_reports_verified_claim(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import claim_bonus_points
+
+    sidebar = FakeLocator()
+    claim = FakeLocator("Claim")
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._find_bonus_claim_target",
+        lambda page, sb: (claim, "Claim your 6 bonus points before they expire Claim"),
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.get_points",
+        lambda page, sb: "100 points",
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._wait_for_bonus_claim",
+        lambda page, sb, points: True,
+    )
+
+    assert claim_bonus_points(FakePage(), sidebar) is True
+    assert claim.clicks == 1
+    assert "Bonus points claimed (6 points)" in capsys.readouterr().out
+
+
+def test_claim_bonus_points_reports_unverified_click(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import claim_bonus_points
+
+    sidebar = FakeLocator()
+    claim = FakeLocator("Claim")
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._find_bonus_claim_target",
+        lambda page, sb: (claim, "Claim your 6 bonus points before they expire Claim"),
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.get_points",
+        lambda page, sb: "100 points",
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._wait_for_bonus_claim",
+        lambda page, sb, points: False,
+    )
+
+    assert claim_bonus_points(FakePage(), sidebar) is False
+    assert "could not be verified" in capsys.readouterr().out
+
+
+def test_guide_tasks_checks_bonus_after_task_sections(monkeypatch) -> None:
+    from bing_rewardd.rewards import guide_tasks
+
+    page = FakePage()
+    sidebar = FakeLocator()
+    claimed_with: list[FakeLocator] = []
+
+    monkeypatch.setattr("bing_rewardd.rewards.open_rewards_sidebar", lambda p: sidebar)
+    monkeypatch.setattr("bing_rewardd.rewards.search_for_term", lambda p, term: None)
+    monkeypatch.setattr("bing_rewardd.rewards.sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.list_visible_tasks",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.get_points",
+        lambda page, sb: "100 points",
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.claim_bonus_points",
+        lambda page, sb: claimed_with.append(sb) or True,
+    )
+
+    guide_tasks(page)
+
+    assert claimed_with == [sidebar]
+
+
+def test_find_dashboard_claim_control_requires_final_label() -> None:
+    from bing_rewardd.rewards import (
+        DASHBOARD_CLAIM_CONTROL_SELECTORS,
+        _find_dashboard_claim_control,
+    )
+
+    ready_card = FakeLocator("Ready to claim | 6 | Claim")
+    final_claim = FakeLocator("6 | Pending | Claim points")
+    page = FakeLocatorPage(
+        {
+            DASHBOARD_CLAIM_CONTROL_SELECTORS[0]: [final_claim],
+            DASHBOARD_CLAIM_CONTROL_SELECTORS[1]: [ready_card],
+        }
+    )
+
+    assert _find_dashboard_claim_control(page) is final_claim  # type: ignore[arg-type]
+
+
+def test_claim_dashboard_bonus_clicks_final_modal_button() -> None:
+    from bing_rewardd.rewards import (
+        DASHBOARD_CLAIM_CONTROL_SELECTORS,
+        _claim_dashboard_bonus,
+    )
+
+    class ClaimingControl(FakeLocator):
+        def click(self, timeout: int) -> None:
+            super().click(timeout)
+            self.visible = False
+
+    final_claim = ClaimingControl("Claim points")
+    dashboard = FakeLocatorPage(
+        {DASHBOARD_CLAIM_CONTROL_SELECTORS[0]: [final_claim]}
+    )
+
+    assert _claim_dashboard_bonus(dashboard, FakePage(), FakeLocator(), "100 points") is True  # type: ignore[arg-type]
+    assert final_claim.clicks == 1
+
+
+def test_claim_bonus_points_completes_dashboard_popup(monkeypatch, capsys) -> None:
+    from bing_rewardd.rewards import claim_bonus_points
+
+    main_page = FakePage()
+    dashboard_page = FakePage()
+    sidebar = FakeLocator()
+    outer_claim = FakeLocator("Claim")
+    main_page.context = type("Context", (), {"pages": [main_page, dashboard_page]})()  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._find_bonus_claim_target",
+        lambda page, sb: (outer_claim, "Claim your 6 bonus points before they expire Claim"),
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards.get_points",
+        lambda page, sb: "100 points",
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._wait_for_new_page",
+        lambda page, existing: dashboard_page,
+    )
+    monkeypatch.setattr(
+        "bing_rewardd.rewards._claim_dashboard_bonus",
+        lambda dashboard, original, sb, points: True,
+    )
+
+    assert claim_bonus_points(main_page, sidebar) is True
+    assert outer_claim.clicks == 1
+    assert "Bonus points claimed (6 points)" in capsys.readouterr().out

@@ -1,6 +1,6 @@
 # Bing Rewardd
 
-A Python + Playwright CLI tool for opening Chrome, navigating to Bing and Microsoft Rewards, and completing visible Rewards tasks.
+A Python + Playwright CLI tool for opening Chrome, navigating to Bing and Microsoft Rewards, completing visible Rewards tasks, and claiming an available bonus-points card.
 
 This tool intentionally does not farm rewards, generate fake searches, or bypass captchas. It opens the Rewards sidebar and completes visible tasks. The Search Streak task is handled by performing a single "weather" search. Both local runs and GitHub Actions use a Playwright storage-state file to restore login cookies and localStorage.
 
@@ -24,7 +24,8 @@ Flags: `--storage-state FILE` (default `storage_state.json`), `--save-storage-st
 ## Notes
 
 - The browser runs visibly, not headless. Use `--headless` to override (may reduce task reliability on Bing).
-- No user input required — all actions are automatic.
+- No user input required — task actions and a visible bonus-points claim are automatic.
+- After task completion, the tool refreshes the Rewards flyout, opens the bonus card's Rewards dashboard link, and clicks the final `Claim points` control. It skips the claim step when no bonus card is available.
 - Login state is stored in a Playwright storage-state file; CI receives it through `BING_STORAGE_STATE_B64`.
 - Optional auto-login fallback: if the sidebar shows a sign-in prompt, the tool can read `.credentials.json` (git-ignored) to drive the Microsoft login flow. Credentials are never stored in the storage-state file or committed.
 

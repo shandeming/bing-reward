@@ -16,7 +16,7 @@ from bing_rewardd.rewards import guide_tasks
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bing-rewardd",
-        description="Open Bing and guide Microsoft Rewards tasks with explicit user confirmation.",
+        description="Open Bing, complete visible Microsoft Rewards tasks, and claim available bonus points.",
     )
     parser.add_argument(
         "--slow-mo",
@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser(
         "tasks",
-        help="Detect and complete all visible Rewards tasks.",
+        help="Detect and complete visible Rewards tasks, then claim available bonus points.",
     )
     return parser
 
