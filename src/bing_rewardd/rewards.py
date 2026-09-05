@@ -781,17 +781,58 @@ def _extract_labeled_points_balance(text: str) -> str | None:
     return None
 
 
-def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
-    """Read the current Rewards balance without mistaking offer values for it."""
-    task_scope = sidebar or find_rewards_sidebar(page)
-    if task_scope is None:
-        return None
+def _points_scopes(page: Page, sidebar: Locator | None) -> list[Any]:
+    """Return live DOM scopes that may contain the account balance.
 
-    frame = _get_rewards_frame(page, task_scope)
-    scope = frame or task_scope
+    The Rewards flyout is frequently replaced after a task is opened. A
+    Locator passed in by the caller is normally live, but its iframe can still
+    point at the previous flyout during that replacement. Re-discover the
+    current sidebar first, and retain the outer sidebar as a fallback because
+    some Bing variants render the balance outside the task iframe.
+    """
+    scopes: list[Any] = []
+    seen_ids: set[int] = set()
 
-    # Prefer elements that identify the account balance. The flyout contains
-    # many other point values (referral offers, streak bonuses, task values).
+    try:
+        live_sidebar = find_rewards_sidebar(page)
+    except Exception:
+        live_sidebar = None
+
+    for task_scope in (live_sidebar, sidebar):
+        if task_scope is None:
+            continue
+
+        try:
+            frame = _get_rewards_frame(page, task_scope)
+        except Exception:
+            frame = None
+        for scope in (frame, task_scope):
+            if scope is None or id(scope) in seen_ids:
+                continue
+            seen_ids.add(id(scope))
+            scopes.append(scope)
+
+    # If the host iframe was rerendered, the frame itself is a more reliable
+    # handle than the old outer sidebar locator. Only inspect Rewards frames
+    # so unrelated Bing frames cannot contribute promotional point values.
+    try:
+        for frame in page.frames:
+            if frame is getattr(page, "main_frame", None):
+                continue
+            frame_url = (getattr(frame, "url", "") or "").casefold()
+            if "panelflyout" not in frame_url and "/rewards/" not in frame_url:
+                continue
+            if id(frame) not in seen_ids:
+                seen_ids.add(id(frame))
+                scopes.append(frame)
+    except Exception:
+        pass
+
+    return scopes
+
+
+def _read_points_from_scope(scope: Any) -> str | None:
+    """Read a balance from one frame or flyout scope."""
     for selector in REWARDS_BALANCE_SELECTORS:
         try:
             candidate = scope.locator(selector).first
@@ -803,14 +844,42 @@ def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
         except Exception:
             continue
 
-    # Support older layouts, but require an explicit balance label. Returning
-    # N/A is safer than treating the first promotional "7,500 points" as the
-    # user's balance.
     try:
-        text = scope.locator("body").inner_text(timeout=3000)
+        body = scope.locator("body")
+        if body.count() > 0:
+            text = body.inner_text(timeout=3000)
+        else:
+            text = scope.inner_text(timeout=3000)
         return _extract_labeled_points_balance(text)
     except Exception:
         return None
+
+
+def get_points(page: Page, sidebar: Locator | None = None) -> str | None:
+    """Read the current Rewards balance without mistaking offer values for it."""
+    for scope in _points_scopes(page, sidebar):
+        points = _read_points_from_scope(scope)
+        if points:
+            return points
+    return None
+
+
+def _get_points_after_settle(
+    page: Page,
+    sidebar: Locator | None,
+    attempts: int = 5,
+) -> str | None:
+    """Poll briefly for the balance after the flyout has been refreshed."""
+    for attempt in range(attempts):
+        points = get_points(page, sidebar)
+        if points:
+            return points
+        if attempt < attempts - 1:
+            try:
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
+    return None
 
 
 def _find_bonus_claim_target(
@@ -1247,15 +1316,19 @@ def guide_tasks(page: Page) -> None:
     # 4. The completed task groups can unlock a separate bonus card at the
     # top of the flyout. Refresh the sidebar so the claim uses live locators.
     print("Checking for bonus points to claim...")
+    final_sidebar: Locator | None = None
     try:
-        sidebar = open_rewards_sidebar(page)
+        final_sidebar = open_rewards_sidebar(page)
     except (NotLoggedInError, RewardsSidebarError) as exc:
         print(f"  [bonus] Could not reopen Rewards sidebar: {exc}")
     else:
-        claim_bonus_points(page, sidebar)
+        claim_bonus_points(page, final_sidebar)
 
     # Display ending points
-    end_points = get_points(page, sidebar)
+    # Never reuse the sidebar captured before the last task. Task clicks and
+    # the bonus dashboard can replace the flyout iframe, leaving that locator
+    # unable to see the newly rendered balance.
+    end_points = _get_points_after_settle(page, final_sidebar)
     print(f"Ending points: {end_points if end_points else 'N/A'}")
     _report_points_change(start_points, end_points)
 

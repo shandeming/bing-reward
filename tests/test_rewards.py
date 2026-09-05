@@ -171,6 +171,60 @@ def test_get_points_does_not_treat_offer_as_balance() -> None:
     assert get_points(FakePage(), sidebar) is None
 
 
+def test_get_points_reacquires_live_sidebar_after_flyout_rerender(monkeypatch) -> None:
+    from bing_rewardd.rewards import get_points
+
+    stale_sidebar = FakeLocator(
+        children={
+            "body": [
+                FakeLocator("Ready to refer a friend? Earn up to 7,500 points a month.")
+            ]
+        }
+    )
+    live_sidebar = FakeLocator(
+        children={
+            ".balance_card_points_clickable": [
+                FakeLocator("8,081\nMy rewards points")
+            ]
+        }
+    )
+    monkeypatch.setattr("bing_rewardd.rewards.find_rewards_sidebar", lambda page: live_sidebar)
+
+    assert get_points(FakePage(), stale_sidebar) == "8,081 points"
+
+
+def test_get_points_falls_back_to_outer_sidebar_when_frame_has_no_balance() -> None:
+    from bing_rewardd.rewards import get_points
+
+    frame_scope = FakeLocator(
+        children={"body": [FakeLocator("Daily set Keep earning 10 points")]}
+    )
+    sidebar = FakeLocator(
+        children={
+            "iframe": [FakeLocator()],
+            ".balance_card_points_clickable": [
+                FakeLocator("8,081\nMy rewards points")
+            ],
+        }
+    )
+    page = FakeFramePage({}, frame_scope)
+
+    assert get_points(page, sidebar) == "8,081 points"
+
+
+def test_get_points_after_settle_retries_transient_empty_balance(monkeypatch) -> None:
+    from bing_rewardd.rewards import _get_points_after_settle
+
+    reads = iter([None, None, "8,081 points"])
+    waits: list[int] = []
+    monkeypatch.setattr("bing_rewardd.rewards.get_points", lambda page, sidebar: next(reads))
+    page = FakePage()
+    page.wait_for_timeout = lambda timeout: waits.append(timeout)  # type: ignore[method-assign]
+
+    assert _get_points_after_settle(page, None, attempts=5) == "8,081 points"
+    assert waits == [1000, 1000]
+
+
 def test_report_points_change_warns_in_console(monkeypatch, capsys) -> None:
     from bing_rewardd.rewards import _report_points_change
 
