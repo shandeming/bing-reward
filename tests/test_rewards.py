@@ -318,6 +318,44 @@ def test_list_visible_tasks_returns_empty_without_sidebar() -> None:
     assert tasks == []
 
 
+@pytest.mark.parametrize("visible, expected", [(True, True), (False, False)])
+def test_daily_set_completion_panel_in_frame(visible, expected) -> None:
+    from bing_rewardd.rewards import _daily_set_is_complete
+
+    frame = FakeLocator(children={
+        "#daily_set_card .dset_completion_comp": [FakeLocator(visible=visible)],
+    })
+    sidebar = FakeLocator(children={"iframe": [FakeLocator()]})
+    assert _daily_set_is_complete(FakeFramePage({}, frame), sidebar) is expected
+
+
+def test_daily_set_missing_cards_does_not_imply_completion() -> None:
+    from bing_rewardd.rewards import _daily_set_is_complete
+
+    assert not _daily_set_is_complete(FakePage(), FakeLocator())
+
+
+@pytest.mark.parametrize("completed", [True, False])
+def test_guide_tasks_reports_daily_set_without_links(monkeypatch, capsys, completed) -> None:
+    from bing_rewardd.rewards import guide_tasks
+
+    sidebar = FakeLocator(children={
+        "#daily_set_card .dset_completion_comp": [FakeLocator(visible=completed)],
+    })
+    monkeypatch.setattr("bing_rewardd.rewards.open_rewards_sidebar", lambda p: sidebar)
+    monkeypatch.setattr("bing_rewardd.rewards.search_for_term", lambda *args: None)
+    monkeypatch.setattr("bing_rewardd.rewards.sleep", lambda seconds: None)
+    monkeypatch.setattr("bing_rewardd.rewards.list_visible_tasks", lambda *a, **kw: [])
+    monkeypatch.setattr("bing_rewardd.rewards.get_points", lambda *args: "100 points")
+    monkeypatch.setattr("bing_rewardd.rewards.claim_bonus_points", lambda *args: False)
+
+    guide_tasks(FakePage())
+    output = capsys.readouterr().out
+    assert ("Daily Set: already completed" in output) is completed
+    assert ("completion could not be confirmed" in output) is not completed
+    assert ("No Rewards tasks found" in output) is not completed
+
+
 def test_list_visible_tasks_uses_section_heading(monkeypatch) -> None:
     found_calls: list[str] = []
     fake_result = [

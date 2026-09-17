@@ -303,6 +303,12 @@ def _is_signed_in_to_rewards(page: Page) -> bool:
     return True
 
 
+def _daily_set_is_complete(page: Page, sidebar: Locator) -> bool:
+    """Bing replaces finished daily cards with a completion panel, not links."""
+    scope = _task_locator_scope(page, sidebar)
+    return _is_visible(scope.locator("#daily_set_card .dset_completion_comp").first)
+
+
 def list_visible_tasks(
     page: Page,
     section_heading: str | None = None,
@@ -1248,6 +1254,7 @@ def guide_tasks(page: Page) -> None:
         return
 
     found_any = False
+    daily_set_completed = False
 
     # Display starting points
     start_points = get_points(page, sidebar)
@@ -1273,6 +1280,12 @@ def guide_tasks(page: Page) -> None:
         except RewardsSidebarError:
             continue
         tasks = list_visible_tasks(page, section_heading=heading, sidebar=sidebar)
+        if not tasks and heading == DAILY_SET_SECTION_HEADING:
+            if _daily_set_is_complete(page, sidebar):
+                daily_set_completed = True
+                print("Daily Set: already completed; Bing has replaced the task cards with a completion panel.")
+            else:
+                print("[!] Daily Set cards were not found, and completion could not be confirmed.")
         if tasks:
             found_any = True
             print(f"Detected {len(tasks)} {label} tasks:")
@@ -1310,7 +1323,7 @@ def guide_tasks(page: Page) -> None:
                 selector_list=tuple(selector_list),
             )
 
-    if not found_any:
+    if not found_any and not daily_set_completed:
         print("No Rewards tasks found in the sidebar.")
 
     # 4. The completed task groups can unlock a separate bonus card at the
