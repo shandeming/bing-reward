@@ -1025,3 +1025,44 @@ def test_claim_bonus_points_completes_dashboard_popup(monkeypatch, capsys) -> No
     assert claim_bonus_points(main_page, sidebar) is True
     assert outer_claim.clicks == 1
     assert "Bonus points claimed (6 points)" in capsys.readouterr().out
+
+
+def test_daily_set_retries_until_cards_render(monkeypatch) -> None:
+    from bing_rewardd.rewards import RewardTask
+
+    task = RewardTask(1, "Daily activity", "available", FakeLocator())
+    reads = iter([[], [], [task]])
+    waits = []
+    page = FakePage()
+    page.wait_for_timeout = waits.append
+    monkeypatch.setattr("bing_rewardd.rewards._get_rewards_frame", lambda *args: object())
+    monkeypatch.setattr("bing_rewardd.rewards._find_cards_by_section", lambda *args: next(reads))
+    monkeypatch.setattr("bing_rewardd.rewards._daily_set_is_complete", lambda *args: False)
+
+    assert list_visible_tasks(page, "Daily set", FakeLocator()) == [task]
+    assert waits == [1000, 1000]
+
+
+def test_daily_set_does_not_retry_completed_panel(monkeypatch) -> None:
+    page = FakePage()
+    waits = []
+    page.wait_for_timeout = waits.append
+    monkeypatch.setattr("bing_rewardd.rewards._get_rewards_frame", lambda *args: object())
+    monkeypatch.setattr("bing_rewardd.rewards._find_cards_by_section", lambda *args: [])
+    monkeypatch.setattr("bing_rewardd.rewards._daily_set_is_complete", lambda *args: True)
+
+    assert list_visible_tasks(page, "Daily set", FakeLocator()) == []
+    assert waits == []
+
+
+def test_daily_set_retry_is_bounded(monkeypatch) -> None:
+    page = FakePage()
+    waits = []
+    page.wait_for_timeout = waits.append
+    monkeypatch.setattr("bing_rewardd.rewards._get_rewards_frame", lambda *args: object())
+    monkeypatch.setattr("bing_rewardd.rewards._find_cards_by_section", lambda *args: [])
+    monkeypatch.setattr("bing_rewardd.rewards._daily_set_is_complete", lambda *args: False)
+    monkeypatch.setattr("bing_rewardd.rewards._find_tasks_by_selectors", lambda *args: [])
+
+    assert list_visible_tasks(page, "Daily set", FakeLocator()) == []
+    assert waits == [1000] * 5

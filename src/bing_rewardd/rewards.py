@@ -324,12 +324,19 @@ def list_visible_tasks(
         return _find_tasks_by_selectors(page, task_scope, selector_list, limit)
 
     if section_heading:
+        normalized_heading = section_heading.casefold()
         frame = _get_rewards_frame(page, task_scope)
         if frame is not None:
-            tasks = _find_cards_by_section(frame, section_heading)
-            if tasks:
-                return tasks
-        normalized_heading = section_heading.casefold()
+            # The flyout shell can be ready before its daily cards hydrate.
+            attempts = 6 if normalized_heading == DAILY_SET_SECTION_HEADING.casefold() else 1
+            for attempt in range(attempts):
+                tasks = _find_cards_by_section(frame, section_heading)
+                if tasks:
+                    return tasks[:limit]
+                if attempts > 1 and _daily_set_is_complete(page, task_scope):
+                    return []
+                if attempt < attempts - 1:
+                    page.wait_for_timeout(1000)
         if normalized_heading == DAILY_SET_SECTION_HEADING.casefold():
             fallback_selectors = tuple(DAILY_SET_TASK_SELECTOR)
         elif normalized_heading == KEEP_EARNING_SECTION_HEADING.casefold():
@@ -357,6 +364,11 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
             const normalizedHeading = normalize(heading).toLocaleLowerCase();
             const allCards = Array.from(el.querySelectorAll('a[href]'));
             const containers = [];
+            const visible = (node) => {
+                const rect = node.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0 &&
+                    getComputedStyle(node).visibility !== 'hidden';
+            };
             const addContainer = (candidate) => {
                 if (candidate && candidate.querySelector('a[href]') && !containers.includes(candidate)) {
                     containers.push(candidate);
@@ -381,15 +393,16 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
             // Newer React variants use sections. Find an exact heading first so
             // a broad parent containing several Rewards groups is not selected.
             const headingCandidates = el.querySelectorAll(
-                'h1,h2,h3,h4,h5,h6,[role="heading"],p,[id]'
+                'h1,h2,h3,h4,h5,h6,[role="heading"],p,span,div'
             );
+            const groupNames = new Set(['daily set', 'keep earning', 'daily search', 'daily streaks']);
+            const containsOtherGroup = (node) => Array.from(headingCandidates).some((heading) => {
+                const text = normalize(heading.innerText).toLocaleLowerCase();
+                return node.contains(heading) && groupNames.has(text) && text !== normalizedHeading;
+            });
             for (const headingEl of headingCandidates) {
-                if (normalize(headingEl.innerText).toLocaleLowerCase() !== normalizedHeading) {
-                    continue;
-                }
-                const section = headingEl.closest('section');
-                if (section) {
-                    addContainer(section);
+                if (!visible(headingEl) ||
+                    normalize(headingEl.innerText).toLocaleLowerCase() !== normalizedHeading) {
                     continue;
                 }
                 const knownTaskContainer = headingEl.closest(
@@ -401,14 +414,13 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
                     addContainer(knownTaskContainer);
                     continue;
                 }
-                if (normalizedHeading === 'daily set' || normalizedHeading === 'keep earning') {
-                    continue;
-                }
                 for (
                     let ancestor = headingEl.parentElement;
                     ancestor && ancestor !== el;
                     ancestor = ancestor.parentElement
                 ) {
+                    // Never climb into a shared flyout containing another group.
+                    if (containsOtherGroup(ancestor)) break;
                     if (ancestor.querySelector('a[href]')) {
                         addContainer(ancestor);
                         break;
@@ -416,19 +428,11 @@ def _find_cards_by_section(frame: Any, section_heading: str) -> list[RewardTask]
                 }
             }
 
-            // Retain support for section variants whose heading is not a semantic
-            // heading element.
-            for (const section of el.querySelectorAll('section')) {
-                if (normalize(section.innerText).toLocaleLowerCase().includes(normalizedHeading)) {
-                    addContainer(section);
-                }
-            }
-
             const cards = [];
             const seenCards = new Set();
             for (const container of containers) {
                 for (const card of container.querySelectorAll('a[href]')) {
-                    if (seenCards.has(card)) continue;
+                    if (seenCards.has(card) || !visible(card)) continue;
                     seenCards.add(card);
                     cards.push(card);
                 }
