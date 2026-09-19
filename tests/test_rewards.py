@@ -1031,6 +1031,7 @@ def test_daily_set_retries_until_cards_render(monkeypatch) -> None:
     from bing_rewardd.rewards import RewardTask
 
     task = RewardTask(1, "Daily activity", "available", FakeLocator())
+    monkeypatch.setattr("bing_rewardd.rewards._reveal_daily_set", lambda *args: None)
     reads = iter([[], [], [task]])
     waits = []
     page = FakePage()
@@ -1056,6 +1057,7 @@ def test_daily_set_does_not_retry_completed_panel(monkeypatch) -> None:
 
 
 def test_daily_set_retry_is_bounded(monkeypatch) -> None:
+    monkeypatch.setattr("bing_rewardd.rewards._reveal_daily_set", lambda *args: None)
     page = FakePage()
     waits = []
     page.wait_for_timeout = waits.append
@@ -1065,4 +1067,37 @@ def test_daily_set_retry_is_bounded(monkeypatch) -> None:
     monkeypatch.setattr("bing_rewardd.rewards._find_tasks_by_selectors", lambda *args: [])
 
     assert list_visible_tasks(page, "Daily set", FakeLocator()) == []
-    assert waits == [1000] * 5
+    assert waits == [1000] * 15
+
+
+@pytest.mark.parametrize("recovered", [True, False])
+def test_daily_set_recovery_is_independent_of_keep_earning(monkeypatch, capsys, recovered):
+    from bing_rewardd import rewards
+
+    sidebar = FakeLocator()
+    daily = rewards.RewardTask(1, "Daily activity", "available", FakeLocator())
+    other = rewards.RewardTask(1, "Other activity", "available", FakeLocator())
+    daily_reads = []
+    completed = []
+
+    def discover(page, section_heading=None, **kwargs):
+        if section_heading == "Daily set":
+            daily_reads.append(section_heading)
+            return [daily] if recovered and len(daily_reads) == 2 else []
+        return [other]
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(rewards, "open_rewards_sidebar", lambda *args: sidebar)
+    monkeypatch.setattr(rewards, "search_for_term", lambda *args: None)
+    monkeypatch.setattr(rewards, "sleep", lambda *args: None)
+    monkeypatch.setattr(rewards, "get_points", lambda *args: "100 points")
+    monkeypatch.setattr(rewards, "_get_points_after_settle", lambda *args: "110 points")
+    monkeypatch.setattr(rewards, "claim_bonus_points", lambda *args: False)
+    monkeypatch.setattr(rewards, "_daily_set_is_complete", lambda *args: False)
+    monkeypatch.setattr(rewards, "list_visible_tasks", discover)
+    monkeypatch.setattr(rewards, "complete_section_tasks",
+                        lambda page, tasks, label, **kwargs: completed.append(label))
+    rewards.guide_tasks(FakePage())
+    assert len(daily_reads) == 2
+    assert completed == (["daily-set", "keep-earning"] if recovered else ["keep-earning"])
+    assert ("::warning title=Daily Set not detected::" in capsys.readouterr().out) is not recovered

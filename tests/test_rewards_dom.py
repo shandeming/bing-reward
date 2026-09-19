@@ -51,3 +51,35 @@ def test_daily_set_dom_boundaries(markup, expected):
                 assert task.selector.get_attribute("href") == "/daily"
         finally:
             browser.close()
+
+
+@pytest.mark.parametrize("placeholder", [True, False])
+def test_daily_set_lazy_loads_inside_scrolling_iframe(placeholder):
+    from bing_rewardd.rewards import list_visible_tasks
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content('<div id="rewid-f"><iframe style="height:300px"></iframe></div>')
+            frame = page.frames[1]
+            target_id = 'daily_set_card' if placeholder else 'pending'
+            frame.set_content(
+                '<div style="height:1800px">Rewards summary and streaks</div>'
+                f'<div id="{target_id}" style="min-height:50px">Daily set</div>'
+            )
+            frame.evaluate("""() => {
+                const target = document.querySelector('#daily_set_card, #pending');
+                const observer = new IntersectionObserver(entries => {
+                    if (!entries.some(entry => entry.isIntersecting)) return;
+                    target.id = 'daily_set_card';
+                    target.innerHTML = '<p>Daily set</p><a href="/daily">Daily activity</a>';
+                    observer.disconnect();
+                });
+                observer.observe(target);
+            }""")
+            tasks = list_visible_tasks(page, "Daily set", page.locator('#rewid-f'))
+            assert [task.title for task in tasks] == ["Daily activity"]
+            assert tasks[0].selector.get_attribute('href') == '/daily'
+        finally:
+            browser.close()

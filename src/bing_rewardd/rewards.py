@@ -309,6 +309,28 @@ def _daily_set_is_complete(page: Page, sidebar: Locator) -> bool:
     return _is_visible(scope.locator("#daily_set_card .dset_completion_comp").first)
 
 
+def _reveal_daily_set(page: Page, sidebar: Locator) -> None:
+    """Reveal the daily group to trigger intersection-based lazy loading."""
+    scope = _task_locator_scope(page, sidebar)
+    try:
+        scope.locator("#daily_set_card, #DailySet").first.scroll_into_view_if_needed(timeout=1000)
+    except PlaywrightTimeoutError:
+        # The group itself may be lazy-loaded: advance the flyout's scroll
+        # containers, leaving the Bing page behind the iframe alone.
+        scope.locator("body").evaluate(
+            """el => {
+                for (const node of [el.ownerDocument.scrollingElement,
+                                    ...el.querySelectorAll('*')]) {
+                    if (!node || node.clientHeight <= 0 ||
+                        node.scrollHeight <= node.clientHeight) continue;
+                    if (node !== el.ownerDocument.scrollingElement &&
+                        !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+                    node.scrollTop += Math.max(200, node.clientHeight * 0.75);
+                }
+            }""", timeout=1000,
+        )
+
+
 def list_visible_tasks(
     page: Page,
     section_heading: str | None = None,
@@ -328,7 +350,7 @@ def list_visible_tasks(
         frame = _get_rewards_frame(page, task_scope)
         if frame is not None:
             # The flyout shell can be ready before its daily cards hydrate.
-            attempts = 6 if normalized_heading == DAILY_SET_SECTION_HEADING.casefold() else 1
+            attempts = 16 if normalized_heading == DAILY_SET_SECTION_HEADING.casefold() else 1
             for attempt in range(attempts):
                 tasks = _find_cards_by_section(frame, section_heading)
                 if tasks:
@@ -336,6 +358,7 @@ def list_visible_tasks(
                 if attempts > 1 and _daily_set_is_complete(page, task_scope):
                     return []
                 if attempt < attempts - 1:
+                    _reveal_daily_set(page, task_scope)
                     page.wait_for_timeout(1000)
         if normalized_heading == DAILY_SET_SECTION_HEADING.casefold():
             fallback_selectors = tuple(DAILY_SET_TASK_SELECTOR)
@@ -1284,12 +1307,25 @@ def guide_tasks(page: Page) -> None:
         except RewardsSidebarError:
             continue
         tasks = list_visible_tasks(page, section_heading=heading, sidebar=sidebar)
+        if (not tasks and heading == DAILY_SET_SECTION_HEADING
+                and not _daily_set_is_complete(page, sidebar)):
+            # Recover this group independently of Keep Earning discovery.
+            print("Daily Set missing from flyout; reopening and retrying...")
+            try:
+                sidebar = open_rewards_sidebar(page)
+                tasks = list_visible_tasks(page, section_heading=heading, sidebar=sidebar)
+            except (NotLoggedInError, RewardsSidebarError) as exc:
+                print(f"[!] Daily Set retry failed: {exc}")
         if not tasks and heading == DAILY_SET_SECTION_HEADING:
             if _daily_set_is_complete(page, sidebar):
                 daily_set_completed = True
                 print("Daily Set: already completed; Bing has replaced the task cards with a completion panel.")
             else:
                 print("[!] Daily Set cards were not found, and completion could not be confirmed.")
+                if os.environ.get("GITHUB_ACTIONS", "").casefold() == "true":
+                    print("::warning title=Daily Set not detected::"
+                          "Daily Set is still missing after scrolling and reopening the flyout; "
+                          "completion could not be confirmed.")
         if tasks:
             found_any = True
             print(f"Detected {len(tasks)} {label} tasks:")
