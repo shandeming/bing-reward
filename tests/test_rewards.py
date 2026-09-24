@@ -335,6 +335,25 @@ def test_daily_set_missing_cards_does_not_imply_completion() -> None:
     assert not _daily_set_is_complete(FakePage(), FakeLocator())
 
 
+@pytest.mark.parametrize(
+    "progress, expected",
+    [
+        ("Daily Set (3/3 activities)", True),
+        ("Daily Set (2/3 activities)", False),
+        ("Daily Set (0/0 activities)", False),
+        ("Search with Bing (1/1 searches)", False),
+    ],
+)
+def test_daily_set_completion_uses_streak_progress(progress, expected) -> None:
+    from bing_rewardd.rewards import _daily_set_is_complete
+
+    frame = FakeLocator(children={
+        ".dailycheckin_partnercard .checkins_title_text": [FakeLocator(progress)],
+    })
+    sidebar = FakeLocator(children={"iframe": [FakeLocator()]})
+    assert _daily_set_is_complete(FakeFramePage({}, frame), sidebar) is expected
+
+
 @pytest.mark.parametrize("completed", [True, False])
 def test_guide_tasks_reports_daily_set_without_links(monkeypatch, capsys, completed) -> None:
     from bing_rewardd.rewards import guide_tasks

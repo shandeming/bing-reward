@@ -303,10 +303,41 @@ def _is_signed_in_to_rewards(page: Page) -> bool:
     return True
 
 
-def _daily_set_is_complete(page: Page, sidebar: Locator) -> bool:
-    """Bing replaces finished daily cards with a completion panel, not links."""
+def _daily_set_progress(page: Page, sidebar: Locator) -> tuple[int, int] | None:
+    """Read the Daily Set counter in the flyout's separate streak card."""
     scope = _task_locator_scope(page, sidebar)
-    return _is_visible(scope.locator("#daily_set_card .dset_completion_comp").first)
+    titles = scope.locator(".dailycheckin_partnercard .checkins_title_text")
+    try:
+        count = titles.count()
+    except PlaywrightTimeoutError:
+        return None
+    for index in range(count):
+        title = titles.nth(index)
+        if not _is_visible(title):
+            continue
+        try:
+            text = title.inner_text(timeout=500)
+        except PlaywrightTimeoutError:
+            continue
+        match = re.search(
+            r"\bdaily\s+set\s*\(\s*(\d+)\s*/\s*(\d+)(?:\s+activities?)?\s*\)",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            return tuple(map(int, match.groups()))
+    return None
+
+
+def _daily_set_is_complete(page: Page, sidebar: Locator) -> bool:
+    """Recognize both the daily card's completion panel and streak progress."""
+    scope = _task_locator_scope(page, sidebar)
+    if _is_visible(scope.locator("#daily_set_card .dset_completion_comp").first):
+        return True
+
+    # Bing can remove the cards without rendering the old completion panel.
+    progress = _daily_set_progress(page, sidebar)
+    return progress is not None and progress[1] > 0 and progress[0] >= progress[1]
 
 
 def _reveal_daily_set(page: Page, sidebar: Locator) -> None:
@@ -1319,13 +1350,17 @@ def guide_tasks(page: Page) -> None:
         if not tasks and heading == DAILY_SET_SECTION_HEADING:
             if _daily_set_is_complete(page, sidebar):
                 daily_set_completed = True
-                print("Daily Set: already completed; Bing has replaced the task cards with a completion panel.")
+                print("Daily Set: already completed; task cards are no longer shown.")
             else:
-                print("[!] Daily Set cards were not found, and completion could not be confirmed.")
+                progress = _daily_set_progress(page, sidebar)
+                detail = (f" Progress: {progress[0]}/{progress[1]} activities."
+                          if progress else "")
+                print("[!] Daily Set cards were not found, and completion could not be confirmed."
+                      + detail)
                 if os.environ.get("GITHUB_ACTIONS", "").casefold() == "true":
                     print("::warning title=Daily Set not detected::"
                           "Daily Set is still missing after scrolling and reopening the flyout; "
-                          "completion could not be confirmed.")
+                          "completion could not be confirmed." + detail)
         if tasks:
             found_any = True
             print(f"Detected {len(tasks)} {label} tasks:")

@@ -83,3 +83,21 @@ def test_daily_set_lazy_loads_inside_scrolling_iframe(placeholder):
             assert tasks[0].selector.get_attribute('href') == '/daily'
         finally:
             browser.close()
+
+
+def test_daily_set_completed_streak_without_task_cards():
+    from bing_rewardd.rewards import _daily_set_is_complete
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            page = browser.new_page()
+            page.set_content('<div id="rewid-f"><iframe></iframe></div>')
+            page.frames[1].set_content(
+                '<div class="dailycheckin_partnercard">'
+                '<div class="checkins_title_text">Daily Set (3/3 activities)</div>'
+                '</div>'
+            )
+            assert _daily_set_is_complete(page, page.locator('#rewid-f'))
+        finally:
+            browser.close()
